@@ -1,0 +1,169 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  password      String
+  credits       Int       @default(0)
+  planType      PlanType  @default(FREE)
+  niche         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  posts         Post[]
+  images        GeneratedImage[]
+  transactions  Transaction[]
+  usageLogs     UsageLog[]
+  
+  @@index([email])
+}
+
+enum PlanType {
+  FREE
+  PRO
+  BUSINESS
+}
+
+model Post {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  caption     String
+  cta         String?
+  hashtags    String[]
+  
+  niche       String
+  tone        String
+  goal        String
+  
+  saved       Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model GeneratedImage {
+  id          String      @id @default(cuid())
+  userId      String
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  prompt      String
+  imageUrl    String?
+  quality     ImageQuality
+  status      JobStatus   @default(PENDING)
+  
+  creditsUsed Int
+  costUsd     Float
+  
+  jobId       String?     @unique
+  errorMsg    String?
+  
+  createdAt   DateTime    @default(now())
+  completedAt DateTime?
+  
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+enum ImageQuality {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum JobStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+model Transaction {
+  id              String          @id @default(cuid())
+  userId          String
+  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  amount          Float
+  currency        String          @default("BRL")
+  creditsAdded    Int
+  
+  provider        String          @default("mercadopago")
+  externalId      String?         @unique
+  preferenceId    String?
+  
+  status          PaymentStatus   @default(PENDING)
+  
+  createdAt       DateTime        @default(now())
+  completedAt     DateTime?
+  
+  @@index([userId])
+  @@index([status])
+  @@index([externalId])
+}
+
+enum PaymentStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  REFUNDED
+}
+
+model UsageLog {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  type        UsageType
+  tokensUsed  Int?
+  creditsUsed Int?
+  costUsd     Float
+  
+  metadata    Json?
+  
+  createdAt   DateTime @default(now())
+  
+  @@index([userId])
+  @@index([type])
+  @@index([createdAt])
+}
+
+enum UsageType {
+  CAPTION_GENERATION
+  IMAGE_GENERATION
+}
+
+model SystemConfig {
+  id              String   @id @default(cuid())
+  key             String   @unique
+  value           String
+  description     String?
+  updatedAt       DateTime @updatedAt
+  
+  @@index([key])
+}
+
+model Template {
+  id          String   @id @default(cuid())
+  name        String
+  niche       String
+  tone        String
+  goal        String
+  example     String
+  approved    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  
+  @@index([niche])
+  @@index([approved])
+}

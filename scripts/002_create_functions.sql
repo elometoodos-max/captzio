@@ -6,12 +6,13 @@ security definer
 set search_path = public
 as $$
 begin
+  -- Give new users 2 free credits to test the platform
   insert into public.users (id, email, name, credits)
   values (
     new.id,
     new.email,
     coalesce(new.raw_user_meta_data ->> 'name', null),
-    0
+    2
   )
   on conflict (id) do nothing;
 
@@ -19,7 +20,7 @@ begin
 end;
 $$;
 
--- Trigger to create user profile on signup
+-- Drop trigger before creating to make script idempotent
 drop trigger if exists on_auth_user_created on auth.users;
 
 create trigger on_auth_user_created
@@ -37,6 +38,11 @@ begin
   return new;
 end;
 $$;
+
+-- Drop all triggers before creating to make script idempotent
+drop trigger if exists update_users_updated_at on public.users;
+drop trigger if exists update_transactions_updated_at on public.transactions;
+drop trigger if exists update_system_config_updated_at on public.system_config;
 
 -- Triggers for updated_at
 create trigger update_users_updated_at

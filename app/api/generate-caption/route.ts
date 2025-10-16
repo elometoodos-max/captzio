@@ -1,8 +1,16 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
 import { config } from "@/lib/config"
-
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY
+import { validateCaptionRequest, sanitizeInput } from "@/lib/validation"
+import { checkRateLimit } from "@/lib/rate-limit"
+import {
+  handleError,
+  AuthenticationError,
+  NotFoundError,
+  InsufficientCreditsError,
+  ValidationError,
+  RateLimitError,
+} from "@/lib/error-handler"
 
 interface CaptionRequest {
   businessDescription: string
@@ -22,34 +30,48 @@ export async function POST(request: Request) {
   try {
     const supabase = await createClient()
 
-    // Check authentication
+    // Check authentication with custom error
     const {
       data: { user },
       error: authError,
     } = await supabase.auth.getUser()
 
     if (authError || !user) {
-      return NextResponse.json({ error: "Não autenticado" }, { status: 401 })
+      throw new AuthenticationError()
+    }
+
+    const rateLimit = checkRateLimit(`caption:${user.id}`, 10, 3600000) // 10 per hour
+    if (!rateLimit.allowed) {
+      throw new RateLimitError(rateLimit.resetAt)
     }
 
     // Get user data and check credits
     const { data: userData, error: userError } = await supabase.from("users").select("*").eq("id", user.id).single()
 
     if (userError || !userData) {
-      return NextResponse.json({ error: "Usuário não encontrado" }, { status: 404 })
+      throw new NotFoundError("Usuário")
     }
 
-    const isAdmin = userData.role === "admin" || user.email === process.env.ADMIN_EMAIL
+    const isAdmin = userData.role === "admin" || user.email === config.admin.email
 
-    if (!isAdmin && userData.credits < 1) {
-      return NextResponse.json({ error: "Créditos insuficientes" }, { status: 402 })
+    const body = await request.json()
+    const validation = validateCaptionRequest(body)
+
+    if (!validation.valid) {
+      throw new ValidationError(validation.error!)
     }
 
-    const body: CaptionRequest = await request.json()
     const { businessDescription, tone, platform, goal, numVariations } = body
 
+    const sanitizedDescription = sanitizeInput(businessDescription)
+    const sanitizedGoal = sanitizeInput(goal)
+
+    if (!isAdmin && userData.credits < 1) {
+      throw new InsufficientCreditsError(1, userData.credits)
+    }
+
     // Build the prompt for GPT-5 Nano
-    const prompt = `Você é um copywriter especializado em redes sociais. Gere ${numVariations} variantes de legenda em português para o negócio: ${businessDescription}. Tom: ${tone}. Plataforma: ${platform}. Objetivo: ${goal}. Cada legenda com 1-3 emojis, 1 linha de CTA e 5 hashtags relevantes. Retorne apenas JSON array com objetos: {"caption":"...","cta":"...","hashtags":["...","..."]}. Não explique nada.`
+    const prompt = `Você é um copywriter especializado em redes sociais. Gere ${numVariations} variantes de legenda em português para o negócio: ${sanitizedDescription}. Tom: ${tone}. Plataforma: ${platform}. Objetivo: ${sanitizedGoal}. Cada legenda com 1-3 emojis, 1 linha de CTA e 5 hashtags relevantes. Retorne apenas JSON array com objetos: {"caption":"...","cta":"...","hashtags":["...","..."]}. Não explique nada.`
 
     const openaiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
@@ -78,31 +100,30 @@ export async function POST(request: Request) {
     if (!openaiResponse.ok) {
       const errorData = await openaiResponse.json()
       console.error("[v0] OpenAI API error:", errorData)
-      return NextResponse.json({ error: "Erro ao gerar legendas com IA" }, { status: 500 })
+      throw new Error("Erro ao gerar legendas com IA")
     }
 
     const openaiData = await openaiResponse.json()
     const content = openaiData.choices[0]?.message?.content
 
     if (!content) {
-      return NextResponse.json({ error: "Resposta vazia da IA" }, { status: 500 })
+      throw new Error("Resposta vazia da IA")
     }
 
     // Parse the JSON response
-    let results: CaptionResult[]
+    let results
     try {
-      // Try to extract JSON from markdown code blocks if present
       const jsonMatch = content.match(/```json\n([\s\S]*?)\n```/) || content.match(/```\n([\s\S]*?)\n```/)
       const jsonString = jsonMatch ? jsonMatch[1] : content
       results = JSON.parse(jsonString)
     } catch (parseError) {
       console.error("[v0] Failed to parse OpenAI response:", content)
-      return NextResponse.json({ error: "Erro ao processar resposta da IA" }, { status: 500 })
+      throw new Error("Erro ao processar resposta da IA")
     }
 
     // Calculate tokens and cost
     const tokensUsed = openaiData.usage?.total_tokens || 0
-    const costEstimate = (tokensUsed / 1000000) * 0.45 // Cost for GPT-5 Nano
+    const costEstimate = (tokensUsed / 1000000) * 0.45
 
     if (!isAdmin) {
       const { error: updateError } = await supabase
@@ -112,7 +133,7 @@ export async function POST(request: Request) {
 
       if (updateError) {
         console.error("[v0] Failed to deduct credits:", updateError)
-        return NextResponse.json({ error: "Erro ao processar créditos" }, { status: 500 })
+        throw new Error("Erro ao processar créditos")
       }
     }
 
@@ -136,16 +157,34 @@ export async function POST(request: Request) {
       action: "generate_caption",
       credits_used: isAdmin ? 0 : 1,
       cost_usd: costEstimate,
-      metadata: { tone, platform, goal, tokensUsed, model: config.openai.models.caption },
+      metadata: {
+        tone,
+        platform,
+        goal: sanitizedGoal,
+        tokensUsed,
+        model: config.openai.models.caption,
+        numVariations,
+        rateLimit: {
+          remaining: rateLimit.remaining,
+          resetAt: rateLimit.resetAt,
+        },
+      },
     })
 
     return NextResponse.json({
       results,
       creditsRemaining: isAdmin ? "∞" : userData.credits - 1,
       isAdmin,
+      rateLimit: {
+        remaining: rateLimit.remaining,
+        resetAt: rateLimit.resetAt,
+      },
     })
   } catch (error) {
-    console.error("[v0] Generate caption error:", error)
-    return NextResponse.json({ error: "Erro interno do servidor" }, { status: 500 })
+    const errorResponse = handleError(error)
+    return NextResponse.json(
+      { error: errorResponse.message, code: errorResponse.code },
+      { status: errorResponse.statusCode },
+    )
   }
 }

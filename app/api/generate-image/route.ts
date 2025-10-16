@@ -1,6 +1,16 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
 import { config } from "@/lib/config"
+import { validateImageRequest, sanitizeInput } from "@/lib/validation"
+import { checkRateLimit } from "@/lib/rate-limit"
+import {
+  handleError,
+  AuthenticationError,
+  NotFoundError,
+  InsufficientCreditsError,
+  ValidationError,
+  RateLimitError,
+} from "@/lib/error-handler"
 
 interface ImageRequest {
   prompt: string
@@ -19,33 +29,45 @@ export async function POST(request: Request) {
     } = await supabase.auth.getUser()
 
     if (authError || !user) {
-      return NextResponse.json({ error: "Não autenticado" }, { status: 401 })
+      throw new AuthenticationError()
+    }
+
+    const rateLimit = checkRateLimit(`image:${user.id}`, 5, 3600000) // 5 per hour
+    if (!rateLimit.allowed) {
+      throw new RateLimitError(rateLimit.resetAt)
     }
 
     // Get user data and check credits
     const { data: userData, error: userError } = await supabase.from("users").select("*").eq("id", user.id).single()
 
     if (userError || !userData) {
-      return NextResponse.json({ error: "Usuário não encontrado" }, { status: 404 })
+      throw new NotFoundError("Usuário")
     }
 
     const creditsRequired = 5
+    const isAdmin = userData.role === "admin" || user.email === config.admin.email
 
-    const isAdmin = userData.role === "admin" || user.email === process.env.ADMIN_EMAIL
+    const body = await request.json()
+    const validation = validateImageRequest(body)
 
-    if (!isAdmin && userData.credits < creditsRequired) {
-      return NextResponse.json({ error: "Créditos insuficientes" }, { status: 402 })
+    if (!validation.valid) {
+      throw new ValidationError(validation.error!)
     }
 
-    const body: ImageRequest = await request.json()
     const { prompt, style, quality } = body
+
+    const sanitizedPrompt = sanitizeInput(prompt)
+
+    if (!isAdmin && userData.credits < creditsRequired) {
+      throw new InsufficientCreditsError(creditsRequired, userData.credits)
+    }
 
     // Create image job with pending status
     const { data: imageJob, error: jobError } = await supabase
       .from("images")
       .insert({
         user_id: user.id,
-        prompt,
+        prompt: sanitizedPrompt,
         status: "pending",
         credits_used: isAdmin ? 0 : creditsRequired,
       })
@@ -53,7 +75,7 @@ export async function POST(request: Request) {
       .single()
 
     if (jobError || !imageJob) {
-      return NextResponse.json({ error: "Erro ao criar job de imagem" }, { status: 500 })
+      throw new Error("Erro ao criar job de imagem")
     }
 
     if (!isAdmin) {
@@ -63,26 +85,43 @@ export async function POST(request: Request) {
         .eq("id", user.id)
 
       if (updateError) {
+        // Rollback: delete the image job
+        await supabase.from("images").delete().eq("id", imageJob.id)
         console.error("[v0] Failed to reserve credits:", updateError)
-        return NextResponse.json({ error: "Erro ao reservar créditos" }, { status: 500 })
+        throw new Error("Erro ao reservar créditos")
       }
     }
 
-    // Start async image generation (in production, this would be a queue job)
-    generateImageAsync(imageJob.id, prompt, style, quality, isAdmin)
+    // Start async image generation
+    generateImageAsync(imageJob.id, sanitizedPrompt, style, quality, isAdmin, user.id, rateLimit)
 
     return NextResponse.json({
       jobId: imageJob.id,
       status: "pending",
       isAdmin,
+      rateLimit: {
+        remaining: rateLimit.remaining,
+        resetAt: rateLimit.resetAt,
+      },
     })
   } catch (error) {
-    console.error("[v0] Generate image error:", error)
-    return NextResponse.json({ error: "Erro interno do servidor" }, { status: 500 })
+    const errorResponse = handleError(error)
+    return NextResponse.json(
+      { error: errorResponse.message, code: errorResponse.code },
+      { status: errorResponse.statusCode },
+    )
   }
 }
 
-async function generateImageAsync(jobId: string, prompt: string, style: string, quality: string, isAdmin: boolean) {
+async function generateImageAsync(
+  jobId: string,
+  prompt: string,
+  style: string,
+  quality: string,
+  isAdmin: boolean,
+  userId: string,
+  rateLimit: any,
+) {
   const supabase = await createClient()
 
   try {
@@ -128,18 +167,22 @@ async function generateImageAsync(jobId: string, prompt: string, style: string, 
       })
       .eq("id", jobId)
 
-    // Log usage
-    const { data: imageData } = await supabase.from("images").select("user_id").eq("id", jobId).single()
-
-    if (imageData) {
-      await supabase.from("usage_logs").insert({
-        user_id: imageData.user_id,
-        action: "generate_image",
-        credits_used: isAdmin ? 0 : 5,
-        cost_usd: quality === "hd" ? 0.08 : 0.04,
-        metadata: { style, quality, model: config.openai.models.image },
-      })
-    }
+    await supabase.from("usage_logs").insert({
+      user_id: userId,
+      action: "generate_image",
+      credits_used: isAdmin ? 0 : 5,
+      cost_usd: quality === "hd" ? 0.08 : 0.04,
+      metadata: {
+        style,
+        quality,
+        model: config.openai.models.image,
+        jobId,
+        rateLimit: {
+          remaining: rateLimit.remaining,
+          resetAt: rateLimit.resetAt,
+        },
+      },
+    })
   } catch (error) {
     console.error("[v0] Image generation failed:", error)
 
@@ -163,6 +206,8 @@ async function generateImageAsync(jobId: string, prompt: string, style: string, 
             .from("users")
             .update({ credits: userData.credits + imageData.credits_used })
             .eq("id", imageData.user_id)
+
+          console.log(`[v0] Refunded ${imageData.credits_used} credits to user ${imageData.user_id}`)
         }
       }
     }

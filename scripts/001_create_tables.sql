@@ -76,6 +76,21 @@ alter table public.transactions enable row level security;
 alter table public.system_config enable row level security;
 alter table public.usage_logs enable row level security;
 
+-- Drop existing policies before creating to make script idempotent
+drop policy if exists "Users can view their own profile" on public.users;
+drop policy if exists "Users can update their own profile" on public.users;
+drop policy if exists "Users can view their own posts" on public.posts;
+drop policy if exists "Users can insert their own posts" on public.posts;
+drop policy if exists "Users can delete their own posts" on public.posts;
+drop policy if exists "Users can view their own images" on public.images;
+drop policy if exists "Users can insert their own images" on public.images;
+drop policy if exists "Users can delete their own images" on public.images;
+drop policy if exists "Users can view their own transactions" on public.transactions;
+drop policy if exists "Admins can view system config" on public.system_config;
+drop policy if exists "Admins can update system config" on public.system_config;
+drop policy if exists "Admins can view all usage logs" on public.usage_logs;
+drop policy if exists "Users can view their own usage logs" on public.usage_logs;
+
 -- RLS Policies for users table
 create policy "Users can view their own profile"
   on public.users for select

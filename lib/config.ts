@@ -13,11 +13,14 @@ export const config = {
     image: 5,
   },
   admin: {
-    email: process.env.ADMIN_EMAIL || "admin@captzio.com",
+    email: process.env.ADMIN_EMAIL || "saviobof@gmail.com",
     freeTesting: true,
   },
   mercadopago: {
-    accessToken: process.env.MERCADOPAGO_ACCESS_TOKEN || "",
-    webhookSecret: process.env.MERCADOPAGO_WEBHOOK_SECRET || "",
+    accessToken: process.env.MP_ACCESS_TOKEN || "",
+    webhookSecret: process.env.MP_WEBHOOK_SECRET || "",
+  },
+  site: {
+    url: process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000",
   },
 } as const

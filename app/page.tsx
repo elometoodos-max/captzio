@@ -1,85 +1,123 @@
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Sparkles, ImageIcon, Hash, Zap, Check, ArrowRight } from "lucide-react"
+import { Sparkles, ImageIcon, Hash, Zap, Check, ArrowRight, Menu } from "lucide-react"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 
 export default function HomePage() {
   return (
     <div className="flex min-h-screen flex-col">
       {/* Header */}
       <header className="sticky top-0 z-50 w-full border-b border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="container flex h-16 items-center justify-between">
-          <Link href="/" className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
-              <Sparkles className="h-5 w-5 text-primary-foreground" />
+        <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8">
+          <div className="flex h-16 items-center justify-between">
+            <Link href="/" className="flex items-center gap-2">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
+                <Sparkles className="h-5 w-5 text-primary-foreground" />
+              </div>
+              <span className="font-display text-xl font-bold">Captzio</span>
+            </Link>
+
+            {/* Desktop Navigation */}
+            <nav className="hidden items-center gap-6 md:flex">
+              <Link
+                href="#features"
+                className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+              >
+                Recursos
+              </Link>
+              <Link
+                href="#pricing"
+                className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+              >
+                Preços
+              </Link>
+              <Link
+                href="/auth/login"
+                className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+              >
+                Entrar
+              </Link>
+              <Button asChild>
+                <Link href="/auth/sign-up">Começar Grátis</Link>
+              </Button>
+            </nav>
+
+            {/* Mobile Navigation */}
+            <div className="flex items-center gap-2 md:hidden">
+              <Button asChild size="sm">
+                <Link href="/auth/sign-up">Começar</Link>
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="sm">
+                    <Menu className="h-5 w-5" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-48">
+                  <DropdownMenuItem asChild>
+                    <Link href="#features" className="cursor-pointer">
+                      Recursos
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link href="#pricing" className="cursor-pointer">
+                      Preços
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link href="/auth/login" className="cursor-pointer">
+                      Entrar
+                    </Link>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
-            <span className="font-display text-xl font-bold">Captzio</span>
-          </Link>
-          <nav className="hidden items-center gap-6 md:flex">
-            <Link
-              href="#features"
-              className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
-            >
-              Recursos
-            </Link>
-            <Link
-              href="#pricing"
-              className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
-            >
-              Preços
-            </Link>
-            <Link
-              href="/auth/login"
-              className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
-            >
-              Entrar
-            </Link>
-            <Button asChild>
-              <Link href="/auth/sign-up">Começar Grátis</Link>
-            </Button>
-          </nav>
+          </div>
         </div>
       </header>
 
       <main className="flex-1">
         {/* Hero Section */}
-        <section className="container flex flex-col items-center gap-8 py-24 text-center md:py-32">
-          <div className="inline-flex items-center gap-2 rounded-full border border-border bg-muted px-4 py-1.5 text-sm">
-            <Sparkles className="h-4 w-4 text-primary" />
-            <span className="text-muted-foreground">Powered by GPT-5 & DALL-E 3</span>
-          </div>
-          <h1 className="max-w-4xl font-display text-4xl font-bold leading-tight tracking-tight text-balance md:text-6xl lg:text-7xl">
-            Crie conteúdo incrível para redes sociais com <span className="text-primary">IA</span>
-          </h1>
-          <p className="max-w-2xl text-lg text-muted-foreground text-balance md:text-xl">
-            Gere legendas envolventes, hashtags estratégicas e imagens profissionais em segundos. Economize tempo e
-            aumente seu engajamento.
-          </p>
-          <div className="flex flex-col gap-4 sm:flex-row">
-            <Button size="lg" asChild className="gap-2">
-              <Link href="/auth/sign-up">
-                Começar Agora
-                <ArrowRight className="h-4 w-4" />
-              </Link>
-            </Button>
-            <Button size="lg" variant="outline" asChild>
-              <Link href="#pricing">Ver Preços</Link>
-            </Button>
+        <section className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8">
+          <div className="flex flex-col items-center gap-8 py-16 text-center md:py-24 lg:py-32">
+            <div className="inline-flex items-center gap-2 rounded-full border border-border bg-muted px-4 py-1.5 text-sm">
+              <Sparkles className="h-4 w-4 text-primary" />
+              <span className="text-muted-foreground">Powered by GPT-5 Nano & GPT Image 1</span>
+            </div>
+            <h1 className="max-w-4xl font-display text-4xl font-bold leading-tight tracking-tight text-balance md:text-5xl lg:text-6xl xl:text-7xl">
+              Crie conteúdo incrível para redes sociais com <span className="text-primary">IA</span>
+            </h1>
+            <p className="max-w-2xl text-base text-muted-foreground text-balance md:text-lg lg:text-xl">
+              Gere legendas envolventes, hashtags estratégicas e imagens profissionais em segundos. Economize tempo e
+              aumente seu engajamento.
+            </p>
+            <div className="flex flex-col gap-4 sm:flex-row">
+              <Button size="lg" asChild className="gap-2">
+                <Link href="/auth/sign-up">
+                  Começar Agora
+                  <ArrowRight className="h-4 w-4" />
+                </Link>
+              </Button>
+              <Button size="lg" variant="outline" asChild>
+                <Link href="#pricing">Ver Preços</Link>
+              </Button>
+            </div>
           </div>
         </section>
 
         {/* Features Section */}
-        <section id="features" className="border-t border-border bg-muted/50 py-24">
-          <div className="container">
-            <div className="mb-16 text-center">
-              <h2 className="mb-4 font-display text-3xl font-bold tracking-tight md:text-4xl">
+        <section id="features" className="border-t border-border bg-muted/50 py-16 md:py-24">
+          <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8">
+            <div className="mb-12 md:mb-16 text-center">
+              <h2 className="mb-4 font-display text-3xl font-bold tracking-tight md:text-4xl lg:text-5xl">
                 Tudo que você precisa em um só lugar
               </h2>
-              <p className="mx-auto max-w-2xl text-lg text-muted-foreground">
+              <p className="mx-auto max-w-2xl text-base md:text-lg text-muted-foreground">
                 Ferramentas poderosas de IA para criar conteúdo profissional em minutos
               </p>
             </div>
-            <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-3">
+            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 md:gap-8">
               <Card>
                 <CardHeader>
                   <div className="mb-2 flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10">
@@ -162,17 +200,17 @@ export default function HomePage() {
         </section>
 
         {/* Pricing Section */}
-        <section id="pricing" className="py-24">
-          <div className="container">
-            <div className="mb-16 text-center">
-              <h2 className="mb-4 font-display text-3xl font-bold tracking-tight md:text-4xl">
+        <section id="pricing" className="py-16 md:py-24">
+          <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8">
+            <div className="mb-12 md:mb-16 text-center">
+              <h2 className="mb-4 font-display text-3xl font-bold tracking-tight md:text-4xl lg:text-5xl">
                 Planos para todos os tamanhos
               </h2>
-              <p className="mx-auto max-w-2xl text-lg text-muted-foreground">
+              <p className="mx-auto max-w-2xl text-base md:text-lg text-muted-foreground">
                 Escolha o plano ideal para suas necessidades. Sem mensalidades, pague apenas pelos créditos que usar.
               </p>
             </div>
-            <div className="grid gap-8 md:grid-cols-3">
+            <div className="grid gap-6 md:grid-cols-3 md:gap-8">
               <Card>
                 <CardHeader>
                   <CardTitle>Básico</CardTitle>
@@ -301,12 +339,12 @@ export default function HomePage() {
         </section>
 
         {/* CTA Section */}
-        <section className="border-t border-border bg-muted/50 py-24">
-          <div className="container text-center">
-            <h2 className="mb-4 font-display text-3xl font-bold tracking-tight md:text-4xl">
+        <section className="border-t border-border bg-muted/50 py-16 md:py-24">
+          <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 text-center">
+            <h2 className="mb-4 font-display text-3xl font-bold tracking-tight md:text-4xl lg:text-5xl">
               Pronto para criar conteúdo incrível?
             </h2>
-            <p className="mx-auto mb-8 max-w-2xl text-lg text-muted-foreground">
+            <p className="mx-auto mb-8 max-w-2xl text-base md:text-lg text-muted-foreground">
               Junte-se a milhares de criadores que já estão usando IA para impulsionar suas redes sociais
             </p>
             <Button size="lg" asChild className="gap-2">
@@ -321,7 +359,7 @@ export default function HomePage() {
 
       {/* Footer */}
       <footer className="border-t border-border py-12">
-        <div className="container">
+        <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="grid gap-8 md:grid-cols-4">
             <div>
               <Link href="/" className="mb-4 flex items-center gap-2">

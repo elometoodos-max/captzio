@@ -1,11 +1,11 @@
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Mail, Sparkles } from "lucide-react"
+import { Mail, Sparkles, CheckCircle2 } from "lucide-react"
 import Link from "next/link"
 
 export default function VerifyEmailPage() {
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center p-6">
+    <div className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-b from-background to-muted/20 p-6">
       <Link href="/" className="mb-8 flex items-center gap-2">
         <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary">
           <Sparkles className="h-6 w-6 text-primary-foreground" />
@@ -13,28 +13,59 @@ export default function VerifyEmailPage() {
         <span className="font-display text-2xl font-bold">Captzio</span>
       </Link>
 
-      <Card className="w-full max-w-md">
-        <CardHeader className="text-center">
-          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
-            <Mail className="h-8 w-8 text-primary" />
+      <Card className="w-full max-w-lg border-2">
+        <CardHeader className="text-center pb-4">
+          <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-primary/10 ring-4 ring-primary/20">
+            <Mail className="h-10 w-10 text-primary" />
           </div>
-          <CardTitle className="text-2xl">Verifique seu Email</CardTitle>
-          <CardDescription>Enviamos um link de confirmação para seu email</CardDescription>
+          <CardTitle className="text-2xl md:text-3xl">Verifique seu Email</CardTitle>
+          <CardDescription className="text-base">Estamos quase lá! Só falta um passo</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <p className="text-center text-sm text-muted-foreground">
-            Clique no link que enviamos para ativar sua conta e começar a usar o Captzio.
-          </p>
-          <div className="rounded-lg border border-border bg-muted/50 p-4">
-            <p className="text-sm text-muted-foreground">
-              <strong>Não recebeu o email?</strong>
-              <br />
-              Verifique sua caixa de spam ou aguarde alguns minutos.
-            </p>
+        <CardContent className="space-y-6">
+          <div className="space-y-4">
+            <div className="flex items-start gap-3 rounded-lg bg-primary/5 p-4">
+              <CheckCircle2 className="h-5 w-5 text-primary mt-0.5 flex-shrink-0" />
+              <div className="space-y-1">
+                <p className="text-sm font-medium">Email de confirmação enviado</p>
+                <p className="text-sm text-muted-foreground">
+                  Enviamos um link de verificação para o seu email. Clique no link para ativar sua conta e começar a
+                  usar o Captzio.
+                </p>
+              </div>
+            </div>
+
+            <div className="rounded-lg border-2 border-dashed border-border bg-muted/30 p-4">
+              <p className="text-sm font-medium mb-2">Não recebeu o email?</p>
+              <ul className="space-y-1 text-sm text-muted-foreground">
+                <li className="flex items-center gap-2">
+                  <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+                  Verifique sua caixa de spam ou lixo eletrônico
+                </li>
+                <li className="flex items-center gap-2">
+                  <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+                  Aguarde alguns minutos e recarregue sua caixa de entrada
+                </li>
+                <li className="flex items-center gap-2">
+                  <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+                  Certifique-se de que digitou o email corretamente
+                </li>
+              </ul>
+            </div>
           </div>
-          <Button variant="outline" asChild className="w-full bg-transparent">
-            <Link href="/auth/login">Voltar para Login</Link>
-          </Button>
+
+          <div className="space-y-3">
+            <Button asChild className="w-full">
+              <Link href="/dashboard">Ir para Dashboard</Link>
+            </Button>
+            <Button variant="outline" asChild className="w-full bg-transparent">
+              <Link href="/auth/login">Voltar para Login</Link>
+            </Button>
+          </div>
+
+          <p className="text-center text-xs text-muted-foreground">
+            Após verificar seu email, você será redirecionado para{" "}
+            <span className="font-medium text-foreground">captzio.vercel.app</span>
+          </p>
         </CardContent>
       </Card>
     </div>

@@ -3,8 +3,10 @@ import { createClient } from "@/lib/supabase/server"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Sparkles, CreditCard, ImageIcon, MessageSquare, LogOut, Library, Images, Crown } from "lucide-react"
+import { CreditCard, ImageIcon, MessageSquare, Crown } from "lucide-react"
 import Link from "next/link"
+import { DashboardHeader } from "@/components/dashboard-header"
+import { config } from "@/lib/config"
 
 export default async function DashboardPage() {
   const supabase = await createClient()
@@ -23,76 +25,37 @@ export default async function DashboardPage() {
 
   const credits = userData?.credits || 0
   const userName = userData?.name || user.email?.split("@")[0] || "Usuário"
-  const isAdmin = userData?.role === "admin" || user.email === process.env.ADMIN_EMAIL
+  const isAdmin = userData?.role === "admin" || user.email === config.admin.email
 
   return (
     <div className="flex min-h-screen flex-col">
-      <header className="sticky top-0 z-50 w-full border-b border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="container flex h-16 items-center justify-between">
-          <Link href="/dashboard" className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
-              <Sparkles className="h-5 w-5 text-primary-foreground" />
-            </div>
-            <span className="font-display text-xl font-bold">Captzio</span>
-          </Link>
-          <div className="flex items-center gap-4">
-            <Button variant="ghost" size="sm" asChild>
-              <Link href="/dashboard/library">
-                <Library className="mr-2 h-4 w-4" />
-                Legendas
-              </Link>
-            </Button>
-            <Button variant="ghost" size="sm" asChild>
-              <Link href="/dashboard/images">
-                <Images className="mr-2 h-4 w-4" />
-                Imagens
-              </Link>
-            </Button>
-            {isAdmin ? (
-              <div className="flex items-center gap-2 rounded-lg border border-accent bg-accent/10 px-3 py-1.5">
-                <Crown className="h-4 w-4 text-accent" />
-                <span className="text-sm font-medium">Admin • ∞ créditos</span>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/50 px-3 py-1.5">
-                <CreditCard className="h-4 w-4 text-muted-foreground" />
-                <span className="text-sm font-medium">{credits} créditos</span>
-              </div>
-            )}
-            <form action="/auth/logout" method="post">
-              <Button variant="ghost" size="sm" type="submit">
-                <LogOut className="h-4 w-4" />
-              </Button>
-            </form>
-          </div>
-        </div>
-      </header>
+      <DashboardHeader credits={credits} isAdmin={isAdmin} userName={userName} />
 
       <main className="flex-1">
-        <section className="container py-12">
-          <div className="mb-8">
-            <div className="flex items-center gap-3">
-              <h1 className="font-display text-3xl font-bold">Olá, {userName}</h1>
+        <section className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 py-8 md:py-12">
+          <div className="mb-6 md:mb-8">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+              <h1 className="font-display text-2xl font-bold md:text-3xl">Olá, {userName}</h1>
               {isAdmin && (
-                <Badge variant="secondary" className="gap-1">
+                <Badge variant="secondary" className="w-fit gap-1">
                   <Crown className="h-3 w-3" />
                   Admin
                 </Badge>
               )}
             </div>
-            <p className="text-muted-foreground">
+            <p className="text-sm text-muted-foreground md:text-base">
               {isAdmin ? "Modo de teste administrativo ativo" : "Bem-vindo ao seu dashboard"}
             </p>
           </div>
 
-          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-4 sm:gap-6 md:grid-cols-2 lg:grid-cols-3">
             <Card className="transition-shadow hover:shadow-md">
               <CardHeader>
                 <div className="mb-2 flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10">
                   <MessageSquare className="h-6 w-6 text-primary" />
                 </div>
-                <CardTitle>Gerar Legenda</CardTitle>
-                <CardDescription>Crie legendas e hashtags com GPT-5 Nano</CardDescription>
+                <CardTitle className="text-lg md:text-xl">Gerar Legenda</CardTitle>
+                <CardDescription className="text-sm">Crie legendas e hashtags com GPT-5 Nano</CardDescription>
               </CardHeader>
               <CardContent>
                 <p className="mb-4 text-sm text-muted-foreground">
@@ -109,8 +72,8 @@ export default async function DashboardPage() {
                 <div className="mb-2 flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10">
                   <ImageIcon className="h-6 w-6 text-primary" />
                 </div>
-                <CardTitle>Gerar Imagem</CardTitle>
-                <CardDescription>Crie imagens profissionais com GPT Image 1</CardDescription>
+                <CardTitle className="text-lg md:text-xl">Gerar Imagem</CardTitle>
+                <CardDescription className="text-sm">Crie imagens profissionais com GPT Image 1</CardDescription>
               </CardHeader>
               <CardContent>
                 <p className="mb-4 text-sm text-muted-foreground">
@@ -122,13 +85,13 @@ export default async function DashboardPage() {
               </CardContent>
             </Card>
 
-            <Card className="transition-shadow hover:shadow-md">
+            <Card className="transition-shadow hover:shadow-md md:col-span-2 lg:col-span-1">
               <CardHeader>
                 <div className="mb-2 flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10">
                   <CreditCard className="h-6 w-6 text-primary" />
                 </div>
-                <CardTitle>Comprar Créditos</CardTitle>
-                <CardDescription>Adicione mais créditos à sua conta</CardDescription>
+                <CardTitle className="text-lg md:text-xl">Comprar Créditos</CardTitle>
+                <CardDescription className="text-sm">Adicione mais créditos à sua conta</CardDescription>
               </CardHeader>
               <CardContent>
                 <p className="mb-4 text-sm text-muted-foreground">A partir de R$ 19,90</p>
@@ -140,8 +103,8 @@ export default async function DashboardPage() {
           </div>
 
           {!isAdmin && credits === 0 && (
-            <div className="mt-8 rounded-lg border border-accent/20 bg-accent/5 p-6">
-              <h3 className="mb-2 font-semibold">Você não tem créditos</h3>
+            <div className="mt-6 rounded-lg border border-accent/20 bg-accent/5 p-4 md:mt-8 md:p-6">
+              <h3 className="mb-2 text-base font-semibold md:text-lg">Você não tem créditos</h3>
               <p className="mb-4 text-sm text-muted-foreground">
                 Compre créditos para começar a gerar conteúdo incrível para suas redes sociais
               </p>
@@ -152,11 +115,11 @@ export default async function DashboardPage() {
           )}
 
           {isAdmin && (
-            <div className="mt-8 rounded-lg border border-primary/20 bg-primary/5 p-6">
+            <div className="mt-6 rounded-lg border border-primary/20 bg-primary/5 p-4 md:mt-8 md:p-6">
               <div className="flex items-start gap-3">
-                <Crown className="mt-0.5 h-5 w-5 text-primary" />
+                <Crown className="mt-0.5 h-5 w-5 flex-shrink-0 text-primary" />
                 <div>
-                  <h3 className="mb-2 font-semibold">Modo de Teste Administrativo</h3>
+                  <h3 className="mb-2 text-base font-semibold md:text-lg">Modo de Teste Administrativo</h3>
                   <p className="text-sm text-muted-foreground">
                     Como administrador, você tem acesso ilimitado a todas as funcionalidades sem consumir créditos.
                     Perfeito para testar o sistema antes do lançamento oficial.

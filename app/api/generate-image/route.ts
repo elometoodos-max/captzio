@@ -1,7 +1,6 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
-
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY
+import { config } from "@/lib/config"
 
 interface ImageRequest {
   prompt: string
@@ -94,10 +93,10 @@ async function generateImageAsync(jobId: string, prompt: string, style: string, 
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
+        Authorization: `Bearer ${config.openai.apiKey}`,
       },
       body: JSON.stringify({
-        model: "gpt-image-1",
+        model: config.openai.models.image,
         prompt,
         n: 1,
         size: "1024x1024",
@@ -138,7 +137,7 @@ async function generateImageAsync(jobId: string, prompt: string, style: string, 
         action: "generate_image",
         credits_used: isAdmin ? 0 : 5,
         cost_usd: quality === "hd" ? 0.08 : 0.04,
-        metadata: { style, quality, model: "gpt-image-1" },
+        metadata: { style, quality, model: config.openai.models.image },
       })
     }
   } catch (error) {

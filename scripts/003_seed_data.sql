@@ -2,8 +2,9 @@
 insert into public.system_config (key, value, description) values
   ('caption_cost', '1', 'Credits cost per caption generation'),
   ('image_cost', '5', 'Credits cost per image generation'),
-  ('openai_model_caption', '"gpt-4o-mini"', 'OpenAI model for caption generation'),
-  ('openai_model_image', '"dall-e-3"', 'OpenAI model for image generation'),
+  -- Updated to use GPT-5 Nano and GPT Image 1
+  ('openai_model_caption', '"gpt-5-nano"', 'OpenAI model for caption generation'),
+  ('openai_model_image', '"gpt-image-1"', 'OpenAI model for image generation'),
   ('max_caption_length', '500', 'Maximum caption length in characters'),
   ('max_hashtags', '30', 'Maximum number of hashtags'),
   ('rate_limit_caption', '10', 'Caption generation rate limit per hour'),

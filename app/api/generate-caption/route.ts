@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
+import { config } from "@/lib/config"
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY
 
@@ -54,10 +55,10 @@ export async function POST(request: Request) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
+        Authorization: `Bearer ${config.openai.apiKey}`,
       },
       body: JSON.stringify({
-        model: "gpt-5-nano",
+        model: config.openai.models.caption,
         messages: [
           {
             role: "system",
@@ -130,13 +131,12 @@ export async function POST(request: Request) {
       console.error("[v0] Failed to save caption:", saveError)
     }
 
-    // Log usage
     await supabase.from("usage_logs").insert({
       user_id: user.id,
       action: "generate_caption",
       credits_used: isAdmin ? 0 : 1,
       cost_usd: costEstimate,
-      metadata: { tone, platform, goal, tokensUsed, model: "gpt-5-nano" },
+      metadata: { tone, platform, goal, tokensUsed, model: config.openai.models.caption },
     })
 
     return NextResponse.json({

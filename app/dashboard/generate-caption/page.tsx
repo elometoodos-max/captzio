@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Sparkles, Copy, Check, ArrowLeft, Loader2 } from "lucide-react"
+import { Sparkles, Copy, Check, ArrowLeft, Loader2, Crown } from "lucide-react"
 
 interface CaptionResult {
   caption: string
@@ -29,6 +29,8 @@ export default function GenerateCaptionPage() {
   const [results, setResults] = useState<CaptionResult[]>([])
   const [error, setError] = useState<string | null>(null)
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null)
+  const [isAdmin, setIsAdmin] = useState(false)
+  const [creditsRemaining, setCreditsRemaining] = useState<number | string>(0)
 
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -56,6 +58,8 @@ export default function GenerateCaptionPage() {
       }
 
       setResults(data.results)
+      setIsAdmin(data.isAdmin || false)
+      setCreditsRemaining(data.creditsRemaining)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao gerar legendas")
     } finally {
@@ -79,12 +83,25 @@ export default function GenerateCaptionPage() {
             </div>
             <span className="font-display text-xl font-bold">Captzio</span>
           </Link>
-          <Button variant="ghost" size="sm" asChild>
-            <Link href="/dashboard">
-              <ArrowLeft className="mr-2 h-4 w-4" />
-              Voltar
-            </Link>
-          </Button>
+          <div className="flex items-center gap-4">
+            {isAdmin && (
+              <div className="flex items-center gap-1 rounded-full bg-accent px-3 py-1 text-xs font-medium">
+                <Crown className="h-3 w-3" />
+                Admin - Teste Grátis
+              </div>
+            )}
+            {!isAdmin && creditsRemaining !== 0 && (
+              <div className="text-sm text-muted-foreground">
+                Créditos: <span className="font-semibold text-foreground">{creditsRemaining}</span>
+              </div>
+            )}
+            <Button variant="ghost" size="sm" asChild>
+              <Link href="/dashboard">
+                <ArrowLeft className="mr-2 h-4 w-4" />
+                Voltar
+              </Link>
+            </Button>
+          </div>
         </div>
       </header>
 

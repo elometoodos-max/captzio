@@ -126,8 +126,7 @@ captzio-web/
 1. Create a Mercado Pago developer account
 2. Get your sandbox credentials
 3. Add them to `.env`:
-   - `MP_ACCESS_TOKEN` (server-side)
-   - `NEXT_PUBLIC_MP_PUBLIC_KEY` (client-side)
+   - `MP_ACCESS_TOKEN` (server-side only)
 4. Use test cards from [Mercado Pago docs](https://www.mercadopago.com.br/developers/pt/docs/checkout-api/integration-test/test-cards)
 
 ### Webhook Setup

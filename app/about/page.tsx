@@ -8,11 +8,11 @@ export default function AboutPage() {
   return (
     <div className="flex min-h-screen flex-col">
       <header className="sticky top-0 z-50 w-full border-b border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="container flex h-16 items-center justify-between">
+        <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 flex h-16 items-center justify-between">
           <Link href="/" className="transition-transform hover:scale-105">
             <Logo />
           </Link>
-          <nav className="flex items-center gap-6">
+          <nav className="flex items-center gap-4 sm:gap-6">
             <Link
               href="/"
               className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
@@ -28,19 +28,19 @@ export default function AboutPage() {
 
       <main className="flex-1">
         {/* Hero Section */}
-        <section className="container py-16 md:py-24">
+        <section className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 py-12 sm:py-16 md:py-24">
           <div className="mx-auto max-w-3xl text-center">
-            <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-4 py-1.5 text-sm font-medium text-primary">
-              <Sparkles className="h-4 w-4" />
+            <div className="mb-4 sm:mb-6 inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-3 sm:px-4 py-1.5 text-xs sm:text-sm font-medium text-primary">
+              <Sparkles className="h-3 w-3 sm:h-4 sm:w-4" />
               Sobre o Captzio
             </div>
-            <h1 className="mb-6 font-display text-4xl font-bold tracking-tight md:text-5xl lg:text-6xl">
+            <h1 className="mb-4 sm:mb-6 font-display text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight">
               A primeira IA que{" "}
               <span className="bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
                 entende o Brasil
               </span>
             </h1>
-            <p className="mb-8 text-lg leading-relaxed text-muted-foreground">
+            <p className="mb-6 sm:mb-8 text-base sm:text-lg leading-relaxed text-muted-foreground px-4">
               Nascemos da frustração de ver criadores brasileiros usando ferramentas que não entendem nossa cultura,
               gírias e jeito único de se comunicar. Decidimos mudar isso.
             </p>
@@ -49,7 +49,7 @@ export default function AboutPage() {
 
         {/* Story Section */}
         <section className="border-t border-border bg-muted/30 py-16 md:py-24">
-          <div className="container">
+          <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8">
             <div className="mx-auto max-w-3xl">
               <h2 className="mb-8 text-3xl font-bold">Nossa História</h2>
               <div className="space-y-6 text-muted-foreground">
@@ -75,7 +75,7 @@ export default function AboutPage() {
         </section>
 
         {/* Mission, Vision, Values */}
-        <section className="container py-16 md:py-24">
+        <section className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 py-16 md:py-24">
           <div className="mx-auto max-w-5xl">
             <div className="mb-12 text-center">
               <h2 className="mb-4 font-display text-3xl font-bold tracking-tight md:text-4xl">Nossos Pilares</h2>
@@ -127,7 +127,7 @@ export default function AboutPage() {
 
         {/* Differentials */}
         <section className="border-t border-border bg-muted/30 py-16 md:py-24">
-          <div className="container">
+          <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8">
             <div className="mx-auto max-w-5xl">
               <div className="mb-12 text-center">
                 <h2 className="mb-4 font-display text-3xl font-bold tracking-tight md:text-4xl">
@@ -194,7 +194,7 @@ export default function AboutPage() {
         </section>
 
         {/* Stats */}
-        <section className="container py-16 md:py-24">
+        <section className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 py-16 md:py-24">
           <div className="mx-auto max-w-5xl">
             <div className="mb-12 text-center">
               <h2 className="mb-4 font-display text-3xl font-bold tracking-tight md:text-4xl">Captzio em Números</h2>
@@ -223,12 +223,12 @@ export default function AboutPage() {
 
         {/* CTA */}
         <section className="border-t border-border bg-gradient-to-br from-primary/5 via-background to-accent/5 py-16 md:py-24">
-          <div className="container text-center">
+          <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 text-center">
             <div className="mx-auto max-w-2xl">
-              <h2 className="mb-4 font-display text-3xl font-bold tracking-tight md:text-4xl">
+              <h2 className="mb-4 sm:mb-6 font-display text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight">
                 Junte-se a milhares de criadores
               </h2>
-              <p className="mb-8 text-lg text-muted-foreground">
+              <p className="mb-8 sm:mb-10 text-lg sm:text-xl text-muted-foreground">
                 Comece a criar conteúdo que realmente conecta com o público brasileiro
               </p>
               <Button size="lg" asChild>

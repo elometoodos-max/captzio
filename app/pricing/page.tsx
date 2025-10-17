@@ -2,6 +2,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Check, Sparkles, Zap, X } from "lucide-react"
 import Link from "next/link"
+import { Logo } from "@/components/logo"
 
 export default function PricingPage() {
   const plans = [
@@ -82,11 +83,8 @@ export default function PricingPage() {
       {/* Header */}
       <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="mx-auto flex h-16 w-full max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
-          <Link href="/" className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
-              <Sparkles className="h-5 w-5 text-primary-foreground" />
-            </div>
-            <span className="font-display text-xl font-bold">Captzio</span>
+          <Link href="/">
+            <Logo />
           </Link>
           <nav className="flex items-center gap-4">
             <Button asChild variant="ghost">
@@ -296,11 +294,8 @@ export default function PricingPage() {
         <div className="mx-auto w-full max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
           <div className="grid gap-8 md:grid-cols-4">
             <div>
-              <Link href="/" className="flex items-center gap-2">
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
-                  <Sparkles className="h-5 w-5 text-primary-foreground" />
-                </div>
-                <span className="font-display text-xl font-bold">Captzio</span>
+              <Link href="/">
+                <Logo />
               </Link>
               <p className="mt-4 text-sm text-muted-foreground">
                 Crie conteúdo incrível para redes sociais com inteligência artificial.

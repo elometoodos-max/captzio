@@ -9,11 +9,11 @@ export default function HelpPage() {
   return (
     <div className="flex min-h-screen flex-col">
       <header className="sticky top-0 z-50 w-full border-b border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="container flex h-16 items-center justify-between">
+        <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 flex h-16 items-center justify-between">
           <Link href="/" className="transition-transform hover:scale-105">
             <Logo />
           </Link>
-          <nav className="flex items-center gap-6">
+          <nav className="flex items-center gap-4 sm:gap-6">
             <Link
               href="/"
               className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
@@ -28,21 +28,23 @@ export default function HelpPage() {
       </header>
 
       <main className="flex-1">
-        <section className="container py-16 md:py-24">
+        <section className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 py-12 sm:py-16 md:py-24">
           <div className="mx-auto max-w-4xl">
-            <div className="mb-12 text-center">
-              <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-4 py-1.5 text-sm font-medium text-primary">
-                <HelpCircle className="h-4 w-4" />
+            <div className="mb-8 sm:mb-12 text-center">
+              <div className="mb-3 sm:mb-4 inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-3 sm:px-4 py-1.5 text-xs sm:text-sm font-medium text-primary">
+                <HelpCircle className="h-3 w-3 sm:h-4 sm:w-4" />
                 Central de Ajuda
               </div>
-              <h1 className="mb-4 font-display text-4xl font-bold tracking-tight md:text-5xl">Como podemos ajudar?</h1>
-              <p className="text-lg text-muted-foreground">
+              <h1 className="mb-3 sm:mb-4 font-display text-3xl sm:text-4xl md:text-5xl font-bold tracking-tight">
+                Como podemos ajudar?
+              </h1>
+              <p className="text-base sm:text-lg text-muted-foreground px-4">
                 Encontre respostas rápidas para as perguntas mais frequentes sobre o Captzio
               </p>
             </div>
 
             {/* Quick Links */}
-            <div className="mb-16 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+            <div className="mb-12 sm:mb-16 grid gap-4 sm:gap-6 md:grid-cols-2 lg:grid-cols-3">
               <Card className="transition-all hover:shadow-lg">
                 <CardHeader>
                   <div className="mb-2 flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10">

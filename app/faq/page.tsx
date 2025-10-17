@@ -2,6 +2,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { HelpCircle, Sparkles } from "lucide-react"
 import Link from "next/link"
+import { Logo } from "@/components/logo"
 
 export default function FAQPage() {
   const faqs = [
@@ -69,17 +70,14 @@ export default function FAQPage() {
       {/* Header */}
       <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="mx-auto flex h-16 w-full max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
-          <Link href="/" className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
-              <Sparkles className="h-5 w-5 text-primary-foreground" />
-            </div>
-            <span className="font-display text-xl font-bold">Captzio</span>
+          <Link href="/" className="transition-transform hover:scale-105">
+            <Logo />
           </Link>
-          <nav className="flex items-center gap-4">
-            <Button asChild variant="ghost">
+          <nav className="flex items-center gap-3 sm:gap-4">
+            <Button asChild variant="ghost" size="sm">
               <Link href="/auth/login">Entrar</Link>
             </Button>
-            <Button asChild>
+            <Button asChild size="sm">
               <Link href="/auth/sign-up">Começar Grátis</Link>
             </Button>
           </nav>
@@ -87,21 +85,21 @@ export default function FAQPage() {
       </header>
 
       {/* Hero Section */}
-      <section className="mx-auto w-full max-w-4xl px-4 py-16 sm:px-6 lg:px-8">
+      <section className="mx-auto w-full max-w-4xl px-4 py-12 sm:px-6 sm:py-16 lg:px-8">
         <div className="text-center">
-          <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
-            <HelpCircle className="h-8 w-8 text-primary" />
+          <div className="mx-auto mb-4 sm:mb-6 flex h-12 w-12 sm:h-16 sm:w-16 items-center justify-center rounded-full bg-primary/10">
+            <HelpCircle className="h-6 w-6 sm:h-8 sm:w-8 text-primary" />
           </div>
-          <h1 className="text-balance font-display text-4xl font-bold tracking-tight sm:text-5xl">
+          <h1 className="text-balance font-display text-3xl sm:text-4xl md:text-5xl font-bold tracking-tight">
             Perguntas Frequentes
           </h1>
-          <p className="mx-auto mt-6 max-w-2xl text-pretty text-lg text-muted-foreground">
+          <p className="mx-auto mt-4 sm:mt-6 max-w-2xl text-pretty text-base sm:text-lg text-muted-foreground px-4">
             Encontre respostas para as dúvidas mais comuns sobre o Captzio.
           </p>
         </div>
 
         {/* FAQ List */}
-        <div className="mt-16 space-y-6">
+        <div className="mt-12 sm:mt-16 space-y-4 sm:space-y-6">
           {faqs.map((faq, index) => (
             <Card key={index}>
               <CardHeader>
@@ -117,7 +115,9 @@ export default function FAQPage() {
         {/* Contact CTA */}
         <div className="mt-16 rounded-2xl bg-gradient-to-br from-primary/10 via-primary/5 to-accent/10 p-8 text-center">
           <h2 className="text-2xl font-bold">Ainda tem dúvidas?</h2>
-          <p className="mt-4 text-muted-foreground">Nossa equipe está pronta para ajudar. Entre em contato conosco.</p>
+          <p className="mt-4 text-sm text-muted-foreground">
+            Nossa equipe está pronta para ajudar. Entre em contato conosco.
+          </p>
           <Button asChild size="lg" className="mt-6">
             <Link href="/contact">Falar com Suporte</Link>
           </Button>

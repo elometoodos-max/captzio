@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Sparkles } from "lucide-react"
+import { Logo } from "@/components/logo"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useState } from "react"
@@ -60,15 +60,12 @@ export default function SignUpPage() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center p-6">
-      <Link href="/" className="mb-8 flex items-center gap-2">
-        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary">
-          <Sparkles className="h-6 w-6 text-primary-foreground" />
-        </div>
-        <span className="font-display text-2xl font-bold">Captzio</span>
+    <div className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-b from-background to-muted/20 p-6">
+      <Link href="/" className="mb-8">
+        <Logo size="lg" />
       </Link>
 
-      <Card className="w-full max-w-md">
+      <Card className="w-full max-w-md shadow-lg">
         <CardHeader>
           <CardTitle className="text-2xl">Criar Conta</CardTitle>
           <CardDescription>Preencha os dados abaixo para começar</CardDescription>

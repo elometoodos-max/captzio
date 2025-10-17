@@ -1,19 +1,16 @@
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
-import { Sparkles } from "lucide-react"
+import { Logo } from "@/components/logo"
 
 export default function TermsPage() {
   return (
     <div className="flex min-h-screen flex-col">
       <header className="sticky top-0 z-50 w-full border-b border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="container flex h-16 items-center justify-between">
-          <Link href="/" className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
-              <Sparkles className="h-5 w-5 text-primary-foreground" />
-            </div>
-            <span className="font-display text-xl font-bold">Captzio</span>
+        <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 flex h-16 items-center justify-between">
+          <Link href="/" className="transition-transform hover:scale-105">
+            <Logo />
           </Link>
-          <nav className="flex items-center gap-6">
+          <nav className="flex items-center gap-4 sm:gap-6">
             <Link
               href="/"
               className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
@@ -28,10 +25,12 @@ export default function TermsPage() {
       </header>
 
       <main className="flex-1">
-        <section className="container py-24">
+        <section className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 py-12 sm:py-16 md:py-24">
           <div className="mx-auto max-w-3xl">
-            <h1 className="mb-6 font-display text-4xl font-bold tracking-tight md:text-5xl">Termos de Uso</h1>
-            <p className="mb-8 text-sm text-muted-foreground">Última atualização: Janeiro de 2025</p>
+            <h1 className="mb-4 sm:mb-6 font-display text-3xl sm:text-4xl md:text-5xl font-bold tracking-tight">
+              Termos de Uso
+            </h1>
+            <p className="mb-6 sm:mb-8 text-sm text-muted-foreground">Última atualização: Janeiro de 2025</p>
 
             <div className="prose prose-gray max-w-none space-y-8">
               <section>

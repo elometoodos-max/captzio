@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { CreditCard, ImageIcon, MessageSquare, Crown } from "lucide-react"
+import { CreditCard, ImageIcon, MessageSquare, Crown, Wand2, Trophy, TrendingUp } from "lucide-react"
 import Link from "next/link"
 import { DashboardHeader } from "@/components/dashboard-header"
 import { config } from "@/lib/config"
@@ -49,7 +49,7 @@ export default async function DashboardPage() {
           </div>
 
           <div className="grid gap-4 sm:gap-6 md:grid-cols-2 lg:grid-cols-3">
-            <Card className="transition-shadow hover:shadow-md">
+            <Card className="transition-all hover:shadow-lg hover:-translate-y-1">
               <CardHeader>
                 <div className="mb-2 flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10">
                   <MessageSquare className="h-6 w-6 text-primary" />
@@ -67,7 +67,7 @@ export default async function DashboardPage() {
               </CardContent>
             </Card>
 
-            <Card className="transition-shadow hover:shadow-md">
+            <Card className="transition-all hover:shadow-lg hover:-translate-y-1">
               <CardHeader>
                 <div className="mb-2 flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10">
                   <ImageIcon className="h-6 w-6 text-primary" />
@@ -85,7 +85,55 @@ export default async function DashboardPage() {
               </CardContent>
             </Card>
 
-            <Card className="transition-shadow hover:shadow-md md:col-span-2 lg:col-span-1">
+            <Card className="transition-all hover:shadow-lg hover:-translate-y-1 border-accent/20 bg-gradient-to-br from-accent/5 to-background">
+              <CardHeader>
+                <div className="mb-2 flex h-12 w-12 items-center justify-center rounded-lg bg-accent/10">
+                  <Wand2 className="h-6 w-6 text-accent" />
+                </div>
+                <CardTitle className="text-lg md:text-xl">Estilo de Marca</CardTitle>
+                <CardDescription className="text-sm">Ensine a IA a escrever como você</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <p className="mb-4 text-sm text-muted-foreground">Configure uma vez, use sempre</p>
+                <Button asChild variant="outline" className="w-full bg-transparent">
+                  <Link href="/dashboard/brand-style">Configurar</Link>
+                </Button>
+              </CardContent>
+            </Card>
+
+            <Card className="transition-all hover:shadow-lg hover:-translate-y-1 border-primary/20 bg-gradient-to-br from-primary/5 to-background">
+              <CardHeader>
+                <div className="mb-2 flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10">
+                  <Trophy className="h-6 w-6 text-primary" />
+                </div>
+                <CardTitle className="text-lg md:text-xl">Conquistas</CardTitle>
+                <CardDescription className="text-sm">Desbloqueie badges e ganhe créditos</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <p className="mb-4 text-sm text-muted-foreground">Recompensas por criar conteúdo</p>
+                <Button asChild variant="outline" className="w-full bg-transparent">
+                  <Link href="/dashboard/achievements">Ver Progresso</Link>
+                </Button>
+              </CardContent>
+            </Card>
+
+            <Card className="transition-all hover:shadow-lg hover:-translate-y-1">
+              <CardHeader>
+                <div className="mb-2 flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10">
+                  <TrendingUp className="h-6 w-6 text-primary" />
+                </div>
+                <CardTitle className="text-lg md:text-xl">Estatísticas</CardTitle>
+                <CardDescription className="text-sm">Acompanhe seu progresso e uso</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <p className="mb-4 text-sm text-muted-foreground">Insights sobre seu conteúdo</p>
+                <Button asChild variant="outline" className="w-full bg-transparent">
+                  <Link href="/dashboard/stats">Ver Estatísticas</Link>
+                </Button>
+              </CardContent>
+            </Card>
+
+            <Card className="transition-all hover:shadow-lg hover:-translate-y-1">
               <CardHeader>
                 <div className="mb-2 flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10">
                   <CreditCard className="h-6 w-6 text-primary" />

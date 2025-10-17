@@ -87,6 +87,8 @@ export function validateImageRequest(data: any): ValidationResult {
   return { valid: true }
 }
 
+export { validateImageRequest as validateImageGeneration }
+
 export function sanitizeInput(input: string): string {
   return input.trim().replace(/[<>]/g, "")
 }

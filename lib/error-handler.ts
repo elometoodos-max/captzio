@@ -76,3 +76,12 @@ export function handleError(error: unknown): { message: string; statusCode: numb
     code: "UNKNOWN_ERROR",
   }
 }
+
+export function handleApiError(error: unknown) {
+  const { message, statusCode, code } = handleError(error)
+
+  return new Response(JSON.stringify({ error: message, code }), {
+    status: statusCode,
+    headers: { "Content-Type": "application/json" },
+  })
+}

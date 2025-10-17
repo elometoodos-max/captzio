@@ -19,3 +19,6 @@ export async function createClient() {
     },
   })
 }
+
+// Export createClient as an alias for createServerClient
+export { createClient as createServerClient }

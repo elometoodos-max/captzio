@@ -38,13 +38,14 @@
     "lucide-react": "^0.454.0",
     "next": "15.2.4",
     "next-auth": "^4.24.11",
-    "openai": "^4.77.3",
+    "openai": "latest",
     "react": "^19",
     "react-dom": "^19",
     "swr": "^2.2.5",
     "tailwind-merge": "^2.5.5",
     "tailwindcss-animate": "^1.0.7",
     "tw-animate-css": "latest",
+    "ws": "latest",
     "zod": "^3.24.1"
   },
   "devDependencies": {

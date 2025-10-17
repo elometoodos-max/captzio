@@ -1,9 +1,6 @@
-// FILE: app/(dashboard)/generate-image/page.tsx
-// Next.js App Router client component (TSX)
-
 "use client"
 
-import React, { FormEvent, useEffect, useRef, useState } from "react"
+import { type FormEvent, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -44,7 +41,6 @@ export default function GenerateImagePage() {
       try {
         const response = await fetch(`/api/image-job/${jobId}`)
         if (!response.ok) {
-          // if the job endpoint returns a 4xx/5xx we stop polling and show error
           const text = await response.text().catch(() => "Erro ao checar status do job")
           throw new Error(text || "Erro ao checar status do job")
         }
@@ -55,7 +51,6 @@ export default function GenerateImagePage() {
           setImageJob(data.job)
 
           if (data.job.status === "completed" || data.job.status === "failed") {
-            // stop polling
             if (pollRef.current) {
               clearInterval(pollRef.current)
               pollRef.current = null
@@ -65,7 +60,6 @@ export default function GenerateImagePage() {
         }
       } catch (err) {
         console.error("[v0] Failed to poll job status:", err)
-        // Stop polling on error to avoid infinite loop
         if (pollRef.current) {
           clearInterval(pollRef.current)
           pollRef.current = null
@@ -75,9 +69,7 @@ export default function GenerateImagePage() {
       }
     }
 
-    // start immediately then every 2s
     poll()
-    // store interval id
     pollRef.current = window.setInterval(poll, 2000)
 
     return () => {
@@ -101,7 +93,6 @@ export default function GenerateImagePage() {
     setImageJob(null)
 
     try {
-      // map local quality to backend-expected value (backend will map to API quality)
       const qualityPayload = quality === "hd" ? "high" : quality === "standard" ? "medium" : quality
 
       const response = await fetch("/api/generate-image", {
@@ -116,12 +107,15 @@ export default function GenerateImagePage() {
         throw new Error(data.error || "Erro ao gerar imagem")
       }
 
-      // Backend returns jobId for async flow (or imageBase64 in sync flow)
       if (data.jobId) {
         setJobId(data.jobId)
       } else if (data.imageBase64) {
-        // sync flow: receive base64 image directly
-        setImageJob({ id: "sync", status: "completed", image_url: `data:image/png;base64,${data.imageBase64}`, error_message: null })
+        setImageJob({
+          id: "sync",
+          status: "completed",
+          image_url: `data:image/png;base64,${data.imageBase64}`,
+          error_message: null,
+        })
         setIsLoading(false)
       } else {
         throw new Error("Resposta inesperada do servidor")
@@ -199,7 +193,9 @@ export default function GenerateImagePage() {
                         rows={6}
                         disabled={isLoading}
                       />
-                      <p className="text-xs text-muted-foreground">Seja específico sobre cores, estilo, composição e elementos desejados</p>
+                      <p className="text-xs text-muted-foreground">
+                        Seja específico sobre cores, estilo, composição e elementos desejados
+                      </p>
                     </div>
 
                     <div className="space-y-2">
@@ -268,7 +264,11 @@ export default function GenerateImagePage() {
 
                     {imageJob?.status === "completed" && imageJob.image_url && (
                       <div className="w-full space-y-4">
-                        <img src={imageJob.image_url || "/placeholder.svg"} alt="Imagem gerada" className="w-full rounded-lg border border-border" />
+                        <img
+                          src={imageJob.image_url || "/placeholder.svg"}
+                          alt="Imagem gerada"
+                          className="w-full rounded-lg border border-border"
+                        />
                         <Button onClick={() => handleDownload(imageJob.image_url!)} className="w-full">
                           <Download className="mr-2 h-4 w-4" />
                           Baixar Imagem
@@ -288,7 +288,9 @@ export default function GenerateImagePage() {
                     {!isLoading && !imageJob && (
                       <div className="text-center">
                         <Sparkles className="mx-auto mb-4 h-12 w-12 text-muted-foreground/50" />
-                        <p className="text-sm text-muted-foreground">Preencha o formulário e clique em "Gerar Imagem" para ver o resultado aqui</p>
+                        <p className="text-sm text-muted-foreground">
+                          Preencha o formulário e clique em "Gerar Imagem" para ver o resultado aqui
+                        </p>
                       </div>
                     )}
                   </CardContent>
@@ -301,119 +303,3 @@ export default function GenerateImagePage() {
     </div>
   )
 }
-
-
-// --------------------------------------------------------
-// FILE: pages/api/generate-image.ts
-// Next.js API route (Pages Router). TypeScript.
-
-import type { NextApiRequest, NextApiResponse } from "next";
-import OpenAI from "openai";
-
-// NOTE: Instalar dependência: npm install openai
-
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-// In-memory store for example. Use Redis/DB in produção.
-const jobs: Record<string, any> = {};
-
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
-
-  const { prompt, style, quality } = req.body || {};
-  if (!prompt) return res.status(400).json({ error: "Prompt é obrigatório" });
-
-  try {
-    // Decide whether to run sync or async. For demonstration we'll create an async job.
-    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-
-    jobs[id] = { id, status: "pending", image_url: null, error_message: null };
-
-    // Worker-like async execution (simple example)
-    (async () => {
-      try {
-        jobs[id].status = "processing";
-
-        // Map quality to API expected values
-        const qualityMap: Record<string, string> = {
-          low: "low",
-          medium: "medium",
-          high: "high",
-        };
-
-        const apiQuality = qualityMap[quality] ?? "medium";
-
-        const promptWithStyle = style ? `${prompt} // estilo: ${style}` : prompt;
-
-        const result = await client.images.generate({
-          model: "gpt-image-1",
-          prompt: promptWithStyle,
-          size: "1024x1024",
-          quality: apiQuality,
-          output_format: "png",
-        });
-
-        const b64 = result?.data?.[0]?.b64_json;
-        if (!b64) throw new Error("Nenhuma imagem retornada pela API")
-
-        // Store as data URL (for demo). In production, upload to object storage and return a signed URL.
-        jobs[id].image_url = `data:image/png;base64,${b64}`;
-        jobs[id].status = "completed";
-      } catch (e: any) {
-        console.error("Image generation error:", e);
-        jobs[id].status = "failed";
-        jobs[id].error_message = e?.message || "Erro ao gerar imagem";
-      }
-    })();
-
-    return res.status(200).json({ jobId: id });
-  } catch (err: any) {
-    console.error(err);
-    return res.status(500).json({ error: err?.message ?? "Erro interno" });
-  }
-}
-
-
-// --------------------------------------------------------
-// FILE: pages/api/image-job/[id].ts
-// Polling endpoint to check job status
-
-import type { NextApiRequest, NextApiResponse } from "next";
-
-// reuse the same in-memory store declared above in a real app you'd import a shared module
-// For this single-file demo, we create a minimal re-declaration. In your app, move `jobs` to a separate module.
-let _jobsRef: Record<string, any> | null = null;
-try {
-  // @ts-ignore
-  _jobsRef = (global as any)._CAPTZIO_JOBS || {};
-} catch {}
-
-if (!_jobsRef) {
-  // Try to share between handlers by attaching to global
-  // @ts-ignore
-  (global as any)._CAPTZIO_JOBS = (global as any)._CAPTZIO_JOBS || {};
-  // @ts-ignore
-  _jobsRef = (global as any)._CAPTZIO_JOBS;
-}
-
-export default function handler(req: NextApiRequest, res: NextApiResponse) {
-  const { id } = req.query;
-  const job = _jobsRef?.[id as string];
-  if (!job) return res.status(404).json({ error: "Job não encontrado" });
-  return res.status(200).json({ job });
-}
-
-// --------------------------------------------------------
-// IMPORTANT NOTES
-// 1) Para rodar localmente, instale "openai": npm install openai
-// 2) Configure a variável de ambiente OPENAI_API_KEY no seu ambiente de execução.
-// 3) Este exemplo usa armazenamento em memória para jobs (apenas para desenvolvimento). Em produção use Redis, banco de dados ou uma fila dedicada com workers.
-// 4) Em produção, não retorne data URLs longos diretamente — faça upload para S3/Cloud Storage e retorne URLs assinadas expirando.
-// 5) Ajuste permissões e checagens de conteúdo (moderação) antes de permitir prompts de usuários.
-// 6) Se você usa o App Router e quer as rotas em /app/api, adapte os handlers conforme o novo formato (route handlers).
-
-// --------------------------------------------------------
-// COMO INTEGRAR
-// - O componente client (page.tsx) chama POST /api/generate-image -> retorna jobId
-// - O client faz polling em GET /api/image-job/{jobId} até status completed/failed
-// --------------------------------------------------------

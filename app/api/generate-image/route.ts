@@ -11,6 +11,7 @@ const openai = new OpenAI({
 
 export async function POST(request: NextRequest) {
   try {
+    console.log("[v0] Image generation started")
     const supabase = await createServerClient()
 
     // Get authenticated user
@@ -22,6 +23,8 @@ export async function POST(request: NextRequest) {
     if (authError || !user) {
       return NextResponse.json({ error: "Não autenticado" }, { status: 401 })
     }
+
+    console.log("[v0] User authenticated:", user.id)
 
     // Get request body
     const body = await request.json()
@@ -88,6 +91,8 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    console.log("[v0] Starting async image generation with model:", config.openai.models.image)
+
     // Start async image generation
     generateImageAsync(jobData.id, prompt, style, quality, user.id, isAdmin)
 
@@ -114,12 +119,16 @@ async function generateImageAsync(
   const supabase = await createServerClient()
 
   try {
+    console.log("[v0] Processing image generation for job:", jobId)
+
     // Update status to processing
     await supabase.from("images").update({ status: "processing" }).eq("id", jobId)
 
+    console.log("[v0] Calling OpenAI DALL-E with model:", config.openai.models.image)
+
     // Generate image with OpenAI DALL-E
     const response = await openai.images.generate({
-      model: config.openai.imageModel,
+      model: config.openai.models.image,
       prompt: prompt,
       n: 1,
       size: "1024x1024",
@@ -132,6 +141,8 @@ async function generateImageAsync(
     if (!imageUrl) {
       throw new Error("Nenhuma imagem foi gerada")
     }
+
+    console.log("[v0] Image generated successfully:", imageUrl)
 
     // Update job with completed status
     await supabase
@@ -151,18 +162,20 @@ async function generateImageAsync(
         prompt,
         style,
         quality,
-        model: config.openai.imageModel,
+        model: config.openai.models.image,
       },
     })
   } catch (error) {
     console.error("[v0] Image generation failed:", error)
+
+    const errorMessage = error instanceof Error ? error.message : "Erro desconhecido ao gerar imagem"
 
     // Update job with failed status
     await supabase
       .from("images")
       .update({
         status: "failed",
-        error_message: error instanceof Error ? error.message : "Erro desconhecido",
+        error_message: errorMessage,
       })
       .eq("id", jobId)
 

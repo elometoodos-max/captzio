@@ -28,6 +28,7 @@ interface CaptionResult {
 
 export async function POST(request: Request) {
   try {
+    console.log("[v0] Caption generation started")
     const supabase = await createClient()
 
     // Check authentication with custom error
@@ -39,6 +40,8 @@ export async function POST(request: Request) {
     if (authError || !user) {
       throw new AuthenticationError()
     }
+
+    console.log("[v0] User authenticated:", user.id)
 
     const rateLimit = checkRateLimit(`caption:${user.id}`, 10, 3600000) // 10 per hour
     if (!rateLimit.allowed) {
@@ -73,6 +76,8 @@ export async function POST(request: Request) {
     // Build the prompt for GPT-5 Nano
     const prompt = `Você é um copywriter especializado em redes sociais. Gere ${numVariations} variantes de legenda em português para o negócio: ${sanitizedDescription}. Tom: ${tone}. Plataforma: ${platform}. Objetivo: ${sanitizedGoal}. Cada legenda com 1-3 emojis, 1 linha de CTA e 5 hashtags relevantes. Retorne apenas JSON array com objetos: {"caption":"...","cta":"...","hashtags":["...","..."]}. Não explique nada.`
 
+    console.log("[v0] Calling OpenAI API with model:", config.openai.models.caption)
+
     const openaiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -100,8 +105,10 @@ export async function POST(request: Request) {
     if (!openaiResponse.ok) {
       const errorData = await openaiResponse.json()
       console.error("[v0] OpenAI API error:", errorData)
-      throw new Error("Erro ao gerar legendas com IA")
+      throw new Error(`Erro ao gerar legendas com IA: ${errorData.error?.message || "Erro desconhecido"}`)
     }
+
+    console.log("[v0] OpenAI API response received")
 
     const openaiData = await openaiResponse.json()
     const content = openaiData.choices[0]?.message?.content
@@ -181,6 +188,7 @@ export async function POST(request: Request) {
       },
     })
   } catch (error) {
+    console.error("[v0] Caption generation error:", error)
     const errorResponse = handleError(error)
     return NextResponse.json(
       { error: errorResponse.message, code: errorResponse.code },

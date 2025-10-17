@@ -7,6 +7,9 @@ export const config = {
       caption: "gpt-5-nano",
       image: "gpt-image-1",
     },
+    get imageModel() {
+      return this.models.image
+    },
   },
   credits: {
     caption: 1,
@@ -21,6 +24,6 @@ export const config = {
     webhookSecret: process.env.MP_WEBHOOK_SECRET || "",
   },
   site: {
-    url: process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000",
+    url: process.env.NEXT_PUBLIC_SITE_URL || "https://captzio.vercel.app",
   },
 } as const

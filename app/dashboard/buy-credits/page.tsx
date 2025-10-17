@@ -13,6 +13,14 @@ const pricingTiers = [
     price: 19.9,
     bonus: 0,
     description: "Perfeito para começar",
+    features: [
+      "50 legendas ou 10 imagens",
+      "Geração com GPT-5 Nano",
+      "Imagens com GPT Image 1",
+      "Múltiplos tons de voz",
+      "Hashtags estratégicas",
+      "Suporte por email",
+    ],
   },
   {
     name: "Profissional",
@@ -21,6 +29,15 @@ const pricingTiers = [
     bonus: 10,
     description: "Para criadores de conteúdo",
     popular: true,
+    features: [
+      "160 legendas ou 32 imagens",
+      "Geração com GPT-5 Nano",
+      "Imagens com GPT Image 1",
+      "Múltiplos tons de voz",
+      "Hashtags estratégicas",
+      "Suporte prioritário",
+      "Histórico completo",
+    ],
   },
   {
     name: "Empresarial",
@@ -28,6 +45,16 @@ const pricingTiers = [
     price: 149.9,
     bonus: 50,
     description: "Para equipes e agências",
+    features: [
+      "550 legendas ou 110 imagens",
+      "Geração com GPT-5 Nano",
+      "Imagens com GPT Image 1",
+      "Múltiplos tons de voz",
+      "Hashtags estratégicas",
+      "Suporte VIP 24/7",
+      "Histórico completo",
+      "API de integração",
+    ],
   },
 ]
 
@@ -128,22 +155,12 @@ export default function BuyCreditsPage() {
                       )}
                     </div>
                     <ul className="space-y-2 text-sm">
-                      <li className="flex items-center gap-2">
-                        <Check className="h-4 w-4 text-primary" />
-                        {tier.credits + tier.bonus} legendas ou
-                      </li>
-                      <li className="flex items-center gap-2">
-                        <Check className="h-4 w-4 text-primary" />
-                        {Math.floor((tier.credits + tier.bonus) / 5)} imagens ou
-                      </li>
-                      <li className="flex items-center gap-2">
-                        <Check className="h-4 w-4 text-primary" />
-                        Combinação de ambos
-                      </li>
-                      <li className="flex items-center gap-2">
-                        <Check className="h-4 w-4 text-primary" />
-                        Créditos nunca expiram
-                      </li>
+                      {tier.features.map((feature) => (
+                        <li key={feature} className="flex items-center gap-2">
+                          <Check className="h-4 w-4 text-primary" />
+                          {feature}
+                        </li>
+                      ))}
                     </ul>
                     <Button
                       className={tier.popular ? "w-full" : "w-full bg-transparent"}

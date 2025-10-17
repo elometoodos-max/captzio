@@ -200,141 +200,311 @@ export default function HomePage() {
         </section>
 
         {/* Pricing Section */}
-        <section id="pricing" className="py-16 md:py-24">
+        <section id="pricing" className="relative py-16 md:py-24 overflow-hidden">
+          {/* Background decoration */}
+          <div className="absolute inset-0 -z-10 bg-gradient-to-b from-muted/30 via-background to-background" />
+
           <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8">
             <div className="mb-12 md:mb-16 text-center">
-              <h2 className="mb-4 font-display text-3xl font-bold tracking-tight md:text-4xl lg:text-5xl">
+              <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/5 px-4 py-1.5 text-sm font-medium text-primary">
+                <Zap className="h-4 w-4" />
+                Sem mensalidades • Pague apenas o que usar
+              </div>
+              <h2 className="mb-4 font-display text-3xl font-bold tracking-tight text-balance md:text-4xl lg:text-5xl">
                 Planos para todos os tamanhos
               </h2>
-              <p className="mx-auto max-w-2xl text-base md:text-lg text-muted-foreground">
-                Escolha o plano ideal para suas necessidades. Sem mensalidades, pague apenas pelos créditos que usar.
+              <p className="mx-auto max-w-2xl text-base md:text-lg text-muted-foreground text-balance">
+                Escolha o plano ideal para suas necessidades. Créditos nunca expiram e você pode combinar legendas e
+                imagens como quiser.
               </p>
             </div>
-            <div className="grid gap-6 md:grid-cols-3 md:gap-8">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Básico</CardTitle>
-                  <CardDescription>Perfeito para começar</CardDescription>
-                  <div className="mt-4">
-                    <span className="text-4xl font-bold">R$ 19,90</span>
+
+            <div className="grid gap-6 md:grid-cols-3 md:gap-8 lg:gap-10">
+              {/* Básico Plan */}
+              <Card className="relative overflow-hidden transition-all duration-300 hover:shadow-xl hover:-translate-y-1">
+                <CardHeader className="pb-8">
+                  <CardTitle className="text-2xl">Básico</CardTitle>
+                  <CardDescription className="text-base">Perfeito para começar e testar</CardDescription>
+                  <div className="mt-6 flex items-baseline gap-2">
+                    <span className="text-5xl font-bold tracking-tight">R$ 19</span>
+                    <span className="text-2xl font-semibold text-muted-foreground">,90</span>
                   </div>
+                  <p className="mt-2 text-sm text-muted-foreground">R$ 0,40 por crédito</p>
                 </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-2xl font-bold text-primary">50</span>
-                    <span className="text-muted-foreground">créditos</span>
+                <CardContent className="space-y-6">
+                  <div className="rounded-lg bg-muted/50 p-4">
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-3xl font-bold text-primary">50</span>
+                      <span className="text-lg font-medium text-muted-foreground">créditos</span>
+                    </div>
+                    <p className="mt-1 text-sm text-muted-foreground">Equivale a:</p>
                   </div>
-                  <ul className="space-y-2 text-sm">
-                    <li className="flex items-center gap-2">
-                      <Check className="h-4 w-4 text-primary" />
-                      50 legendas ou
+
+                  <ul className="space-y-3 text-sm">
+                    <li className="flex items-start gap-3">
+                      <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10">
+                        <Check className="h-3 w-3 text-primary" />
+                      </div>
+                      <span>
+                        <strong className="font-semibold">50 legendas</strong> completas com hashtags e CTAs
+                      </span>
                     </li>
-                    <li className="flex items-center gap-2">
-                      <Check className="h-4 w-4 text-primary" />
-                      10 imagens ou
+                    <li className="flex items-start gap-3">
+                      <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10">
+                        <Check className="h-3 w-3 text-primary" />
+                      </div>
+                      <span>
+                        <strong className="font-semibold">10 imagens</strong> em alta qualidade (1024x1024)
+                      </span>
                     </li>
-                    <li className="flex items-center gap-2">
-                      <Check className="h-4 w-4 text-primary" />
-                      Combinação de ambos
+                    <li className="flex items-start gap-3">
+                      <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10">
+                        <Check className="h-3 w-3 text-primary" />
+                      </div>
+                      <span>
+                        Ou qualquer <strong className="font-semibold">combinação</strong> entre legendas e imagens
+                      </span>
                     </li>
-                    <li className="flex items-center gap-2">
-                      <Check className="h-4 w-4 text-primary" />
-                      Suporte por email
+                    <li className="flex items-start gap-3">
+                      <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10">
+                        <Check className="h-3 w-3 text-primary" />
+                      </div>
+                      <span>
+                        Créditos <strong className="font-semibold">nunca expiram</strong>
+                      </span>
+                    </li>
+                    <li className="flex items-start gap-3">
+                      <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10">
+                        <Check className="h-3 w-3 text-primary" />
+                      </div>
+                      <span>Suporte por email em até 24h</span>
                     </li>
                   </ul>
-                  <Button className="w-full bg-transparent" variant="outline" asChild>
-                    <Link href="/auth/sign-up">Começar</Link>
+
+                  <Button className="w-full bg-transparent" variant="outline" size="lg" asChild>
+                    <Link href="/auth/sign-up">
+                      Começar Agora
+                      <ArrowRight className="ml-2 h-4 w-4" />
+                    </Link>
                   </Button>
                 </CardContent>
               </Card>
 
-              <Card className="border-primary shadow-lg">
-                <CardHeader>
-                  <div className="mb-2 inline-flex items-center gap-1 rounded-full bg-primary px-3 py-1 text-xs font-medium text-primary-foreground">
-                    <Zap className="h-3 w-3" />
+              {/* Profissional Plan - Most Popular */}
+              <Card className="relative overflow-hidden border-2 border-primary shadow-2xl transition-all duration-300 hover:shadow-2xl hover:-translate-y-2 scale-105">
+                <div className="absolute right-0 top-0 -mr-8 -mt-8 h-32 w-32 rounded-full bg-primary/10 blur-3xl" />
+                <div className="absolute left-0 bottom-0 -ml-8 -mb-8 h-32 w-32 rounded-full bg-accent/10 blur-3xl" />
+
+                <div className="absolute right-4 top-4 z-10">
+                  <div className="flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground shadow-lg">
+                    <Zap className="h-3.5 w-3.5" />
                     Mais Popular
                   </div>
-                  <CardTitle>Profissional</CardTitle>
-                  <CardDescription>Para criadores de conteúdo</CardDescription>
-                  <div className="mt-4">
-                    <span className="text-4xl font-bold">R$ 49,90</span>
+                </div>
+
+                <CardHeader className="relative pb-8">
+                  <CardTitle className="text-2xl">Profissional</CardTitle>
+                  <CardDescription className="text-base">Para criadores de conteúdo sérios</CardDescription>
+                  <div className="mt-6 flex items-baseline gap-2">
+                    <span className="text-5xl font-bold tracking-tight">R$ 49</span>
+                    <span className="text-2xl font-semibold text-muted-foreground">,90</span>
                   </div>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    R$ 0,31 por crédito • <span className="font-semibold text-primary">Economize 22%</span>
+                  </p>
                 </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-2xl font-bold text-primary">150</span>
-                    <span className="text-muted-foreground">créditos</span>
-                    <span className="ml-auto rounded-full bg-accent px-2 py-0.5 text-xs font-medium text-accent-foreground">
-                      +10 bônus
-                    </span>
+                <CardContent className="relative space-y-6">
+                  <div className="rounded-lg bg-gradient-to-br from-primary/10 to-accent/10 p-4 ring-1 ring-primary/20">
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-3xl font-bold text-primary">160</span>
+                      <span className="text-lg font-medium">créditos</span>
+                      <span className="ml-auto rounded-full bg-primary px-2.5 py-1 text-xs font-bold text-primary-foreground">
+                        +10 BÔNUS
+                      </span>
+                    </div>
+                    <p className="mt-1 text-sm text-muted-foreground">150 créditos + 10 de bônus</p>
                   </div>
-                  <ul className="space-y-2 text-sm">
-                    <li className="flex items-center gap-2">
-                      <Check className="h-4 w-4 text-primary" />
-                      160 legendas ou
+
+                  <ul className="space-y-3 text-sm">
+                    <li className="flex items-start gap-3">
+                      <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary">
+                        <Check className="h-3 w-3 text-primary-foreground" />
+                      </div>
+                      <span>
+                        <strong className="font-semibold">160 legendas</strong> completas com hashtags e CTAs
+                      </span>
                     </li>
-                    <li className="flex items-center gap-2">
-                      <Check className="h-4 w-4 text-primary" />
-                      32 imagens ou
+                    <li className="flex items-start gap-3">
+                      <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary">
+                        <Check className="h-3 w-3 text-primary-foreground" />
+                      </div>
+                      <span>
+                        <strong className="font-semibold">32 imagens</strong> em alta qualidade (1024x1024)
+                      </span>
                     </li>
-                    <li className="flex items-center gap-2">
-                      <Check className="h-4 w-4 text-primary" />
-                      Combinação de ambos
+                    <li className="flex items-start gap-3">
+                      <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary">
+                        <Check className="h-3 w-3 text-primary-foreground" />
+                      </div>
+                      <span>
+                        Ou qualquer <strong className="font-semibold">combinação</strong> entre legendas e imagens
+                      </span>
                     </li>
-                    <li className="flex items-center gap-2">
-                      <Check className="h-4 w-4 text-primary" />
-                      Suporte prioritário
+                    <li className="flex items-start gap-3">
+                      <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary">
+                        <Check className="h-3 w-3 text-primary-foreground" />
+                      </div>
+                      <span>
+                        Créditos <strong className="font-semibold">nunca expiram</strong>
+                      </span>
+                    </li>
+                    <li className="flex items-start gap-3">
+                      <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary">
+                        <Check className="h-3 w-3 text-primary-foreground" />
+                      </div>
+                      <span>
+                        <strong className="font-semibold">Suporte prioritário</strong> em até 12h
+                      </span>
+                    </li>
+                    <li className="flex items-start gap-3">
+                      <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary">
+                        <Check className="h-3 w-3 text-primary-foreground" />
+                      </div>
+                      <span>Acesso antecipado a novos recursos</span>
                     </li>
                   </ul>
-                  <Button className="w-full" asChild>
-                    <Link href="/auth/sign-up">Começar</Link>
+
+                  <Button className="w-full shadow-lg" size="lg" asChild>
+                    <Link href="/auth/sign-up">
+                      Começar Agora
+                      <ArrowRight className="ml-2 h-4 w-4" />
+                    </Link>
                   </Button>
                 </CardContent>
               </Card>
 
-              <Card>
-                <CardHeader>
-                  <CardTitle>Empresarial</CardTitle>
-                  <CardDescription>Para equipes e agências</CardDescription>
-                  <div className="mt-4">
-                    <span className="text-4xl font-bold">R$ 149,90</span>
+              {/* Empresarial Plan */}
+              <Card className="relative overflow-hidden transition-all duration-300 hover:shadow-xl hover:-translate-y-1">
+                <CardHeader className="pb-8">
+                  <CardTitle className="text-2xl">Empresarial</CardTitle>
+                  <CardDescription className="text-base">Para equipes e agências</CardDescription>
+                  <div className="mt-6 flex items-baseline gap-2">
+                    <span className="text-5xl font-bold tracking-tight">R$ 149</span>
+                    <span className="text-2xl font-semibold text-muted-foreground">,90</span>
                   </div>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    R$ 0,27 por crédito • <span className="font-semibold text-primary">Economize 32%</span>
+                  </p>
                 </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-2xl font-bold text-primary">500</span>
-                    <span className="text-muted-foreground">créditos</span>
-                    <span className="ml-auto rounded-full bg-accent px-2 py-0.5 text-xs font-medium text-accent-foreground">
-                      +50 bônus
-                    </span>
+                <CardContent className="space-y-6">
+                  <div className="rounded-lg bg-gradient-to-br from-accent/10 to-primary/10 p-4 ring-1 ring-accent/20">
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-3xl font-bold text-primary">550</span>
+                      <span className="text-lg font-medium">créditos</span>
+                      <span className="ml-auto rounded-full bg-accent px-2.5 py-1 text-xs font-bold text-accent-foreground">
+                        +50 BÔNUS
+                      </span>
+                    </div>
+                    <p className="mt-1 text-sm text-muted-foreground">500 créditos + 50 de bônus</p>
                   </div>
-                  <ul className="space-y-2 text-sm">
-                    <li className="flex items-center gap-2">
-                      <Check className="h-4 w-4 text-primary" />
-                      550 legendas ou
+
+                  <ul className="space-y-3 text-sm">
+                    <li className="flex items-start gap-3">
+                      <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10">
+                        <Check className="h-3 w-3 text-primary" />
+                      </div>
+                      <span>
+                        <strong className="font-semibold">550 legendas</strong> completas com hashtags e CTAs
+                      </span>
                     </li>
-                    <li className="flex items-center gap-2">
-                      <Check className="h-4 w-4 text-primary" />
-                      110 imagens ou
+                    <li className="flex items-start gap-3">
+                      <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10">
+                        <Check className="h-3 w-3 text-primary" />
+                      </div>
+                      <span>
+                        <strong className="font-semibold">110 imagens</strong> em alta qualidade (1024x1024)
+                      </span>
                     </li>
-                    <li className="flex items-center gap-2">
-                      <Check className="h-4 w-4 text-primary" />
-                      Combinação de ambos
+                    <li className="flex items-start gap-3">
+                      <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10">
+                        <Check className="h-3 w-3 text-primary" />
+                      </div>
+                      <span>
+                        Ou qualquer <strong className="font-semibold">combinação</strong> entre legendas e imagens
+                      </span>
                     </li>
-                    <li className="flex items-center gap-2">
-                      <Check className="h-4 w-4 text-primary" />
-                      Suporte VIP 24/7
+                    <li className="flex items-start gap-3">
+                      <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10">
+                        <Check className="h-3 w-3 text-primary" />
+                      </div>
+                      <span>
+                        Créditos <strong className="font-semibold">nunca expiram</strong>
+                      </span>
+                    </li>
+                    <li className="flex items-start gap-3">
+                      <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10">
+                        <Check className="h-3 w-3 text-primary" />
+                      </div>
+                      <span>
+                        <strong className="font-semibold">Suporte VIP 24/7</strong> com resposta imediata
+                      </span>
+                    </li>
+                    <li className="flex items-start gap-3">
+                      <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10">
+                        <Check className="h-3 w-3 text-primary" />
+                      </div>
+                      <span>Gerente de conta dedicado</span>
+                    </li>
+                    <li className="flex items-start gap-3">
+                      <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10">
+                        <Check className="h-3 w-3 text-primary" />
+                      </div>
+                      <span>Treinamento personalizado da equipe</span>
                     </li>
                   </ul>
-                  <Button className="w-full bg-transparent" variant="outline" asChild>
-                    <Link href="/auth/sign-up">Começar</Link>
+
+                  <Button className="w-full bg-transparent" variant="outline" size="lg" asChild>
+                    <Link href="/auth/sign-up">
+                      Começar Agora
+                      <ArrowRight className="ml-2 h-4 w-4" />
+                    </Link>
                   </Button>
                 </CardContent>
               </Card>
             </div>
-            <p className="mt-8 text-center text-sm text-muted-foreground">
-              1 crédito = 1 legenda | 5 créditos = 1 imagem
-            </p>
+
+            {/* Trust signals and additional info */}
+            <div className="mt-12 space-y-6">
+              <div className="flex flex-wrap items-center justify-center gap-6 text-sm text-muted-foreground">
+                <div className="flex items-center gap-2">
+                  <Check className="h-4 w-4 text-primary" />
+                  <span>Créditos nunca expiram</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Check className="h-4 w-4 text-primary" />
+                  <span>Pagamento seguro via Mercado Pago</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Check className="h-4 w-4 text-primary" />
+                  <span>Sem taxas ocultas</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Check className="h-4 w-4 text-primary" />
+                  <span>Cancele quando quiser</span>
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-border bg-muted/30 p-6 text-center">
+                <p className="text-sm font-medium text-muted-foreground">
+                  <strong className="text-foreground">Como funcionam os créditos:</strong> 1 crédito = 1 legenda
+                  completa | 5 créditos = 1 imagem em alta qualidade
+                </p>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Você pode combinar legendas e imagens da forma que preferir. Seus créditos nunca expiram e podem ser
+                  usados a qualquer momento.
+                </p>
+              </div>
+            </div>
           </div>
         </section>
 

@@ -1,16 +1,14 @@
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Mail, Sparkles, CheckCircle2 } from "lucide-react"
+import { Mail, CheckCircle2 } from "lucide-react"
+import { Logo } from "@/components/logo"
 import Link from "next/link"
 
 export default function VerifyEmailPage() {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-b from-background to-muted/20 p-6">
-      <Link href="/" className="mb-8 flex items-center gap-2">
-        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary">
-          <Sparkles className="h-6 w-6 text-primary-foreground" />
-        </div>
-        <span className="font-display text-2xl font-bold">Captzio</span>
+      <Link href="/" className="mb-8">
+        <Logo size="lg" />
       </Link>
 
       <Card className="w-full max-w-lg border-2">
@@ -28,8 +26,8 @@ export default function VerifyEmailPage() {
               <div className="space-y-1">
                 <p className="text-sm font-medium">Email de confirmação enviado</p>
                 <p className="text-sm text-muted-foreground">
-                  Enviamos um link de verificação para o seu email. Clique no link para ativar sua conta e começar a
-                  usar o Captzio.
+                  Enviamos um link de verificação para o seu email. Clique no link para ativar sua conta. Você será
+                  redirecionado automaticamente para o Captzio após a verificação.
                 </p>
               </div>
             </div>
@@ -55,16 +53,12 @@ export default function VerifyEmailPage() {
 
           <div className="space-y-3">
             <Button asChild className="w-full">
-              <Link href="/dashboard">Ir para Dashboard</Link>
-            </Button>
-            <Button variant="outline" asChild className="w-full bg-transparent">
               <Link href="/auth/login">Voltar para Login</Link>
             </Button>
           </div>
 
           <p className="text-center text-xs text-muted-foreground">
-            Após verificar seu email, você será redirecionado para{" "}
-            <span className="font-medium text-foreground">captzio.vercel.app</span>
+            O link de verificação irá redirecioná-lo automaticamente para o Captzio
           </p>
         </CardContent>
       </Card>

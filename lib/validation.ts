@@ -48,12 +48,14 @@ export function validateCaptionRequest(data: any): ValidationResult {
     return { valid: false, error: "Descrição muito longa (máximo 500 caracteres)" }
   }
 
-  if (!data.tone || !["profissional", "casual", "engraçado", "inspirador", "educativo"].includes(data.tone)) {
-    return { valid: false, error: "Tom inválido" }
+  const validTones = ["profissional", "casual", "divertido", "inspirador", "educativo", "vendas"]
+  if (!data.tone || !validTones.includes(data.tone)) {
+    return { valid: false, error: `Tom inválido. Opções válidas: ${validTones.join(", ")}` }
   }
 
-  if (!data.platform || !["instagram", "facebook", "linkedin", "twitter", "tiktok"].includes(data.platform)) {
-    return { valid: false, error: "Plataforma inválida" }
+  const validPlatforms = ["instagram", "facebook", "linkedin", "twitter", "tiktok", "threads"]
+  if (!data.platform || !validPlatforms.includes(data.platform)) {
+    return { valid: false, error: `Plataforma inválida. Opções válidas: ${validPlatforms.join(", ")}` }
   }
 
   if (!data.goal || data.goal.trim().length === 0) {

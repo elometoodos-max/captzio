@@ -2,7 +2,7 @@ export const config = {
   openai: {
     apiKey:
       process.env.OPENAI_API_KEY ||
-      "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",
+      "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",
     models: {
       caption: "gpt-5-nano",
       image: "gpt-image-1",
@@ -27,3 +27,7 @@ export const config = {
     url: process.env.NEXT_PUBLIC_SITE_URL || "https://captzio.vercel.app",
   },
 } as const
+
+if (!config.openai.apiKey || config.openai.apiKey.length < 20) {
+  console.error("[v0] WARNING: OpenAI API key is not properly configured!")
+}

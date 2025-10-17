@@ -93,12 +93,14 @@ export default function GenerateImagePage() {
     setImageJob(null)
 
     try {
-      const qualityPayload = quality === "hd" ? "high" : quality === "standard" ? "medium" : quality
-
       const response = await fetch("/api/generate-image", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: prompt.trim(), style, quality: qualityPayload }),
+        body: JSON.stringify({
+          prompt: prompt.trim(),
+          style,
+          quality, // Send quality as-is (standard or hd)
+        }),
       })
 
       const data = await response.json()

@@ -2,7 +2,7 @@ export const config = {
   openai: {
     apiKey:
       process.env.OPENAI_API_KEY ||
-      "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",
+      "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",
     models: {
       caption: "gpt-5-nano",
       image: "gpt-image-1",

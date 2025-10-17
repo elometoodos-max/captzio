@@ -80,7 +80,8 @@ export function validateImageRequest(data: any): ValidationResult {
     return { valid: false, error: "Estilo inválido" }
   }
 
-  if (!data.quality || !["standard", "hd"].includes(data.quality)) {
+  // Accept both frontend values (standard, hd) and API values (low, medium, high)
+  if (!data.quality || !["standard", "hd", "low", "medium", "high"].includes(data.quality)) {
     return { valid: false, error: "Qualidade inválida" }
   }
 

@@ -13,6 +13,7 @@ import {
   RateLimitError,
 } from "@/lib/error-handler"
 
+// ===== Tipos =====
 interface CaptionRequest {
   businessDescription: string
   tone: string
@@ -20,19 +21,19 @@ interface CaptionRequest {
   goal: string
   numVariations: number
 }
-
 interface CaptionResult {
   caption: string
   cta: string
   hashtags: string[]
 }
 
+// ===== Constantes =====
 const MAX_VARIATIONS = 10
 const MIN_VARIATIONS = 1
 const RESPONSES_ENDPOINT = "https://api.openai.com/v1/responses"
 const MODEL = () => config.openai.models.caption // ex.: "gpt-5-nano"
 
-// ---------- helpers ----------
+// ===== Utils =====
 function clamp(n: number, min: number, max: number) {
   return Math.min(Math.max(n, min), max)
 }
@@ -44,26 +45,40 @@ async function safeJson(res: Response) {
   try { return await res.json() } catch { return null }
 }
 function sleep(ms: number) { return new Promise((r) => setTimeout(r, ms)) }
+
 function stripCodeFences(s: string): string {
   const m = s.match(/```json\s*([\s\S]*?)```/i) || s.match(/```\s*([\s\S]*?)```/i)
   return m ? m[1].trim() : s.trim()
 }
-function extractResponseText(resp: any): string | undefined {
-  const t1 = resp?.output_text
-  if (typeof t1 === "string" && t1.trim()) return t1.trim()
-  const t2 = resp?.output?.[0]?.content?.[0]?.text
-  if (typeof t2 === "string" && t2.trim()) return t2.trim()
-  if (Array.isArray(resp?.data)) {
-    const parts: string[] = []
-    for (const item of resp.data) {
-      const piece = item?.output_text || item?.output?.[0]?.content?.[0]?.text
-      if (typeof piece === "string") parts.push(piece)
-    }
-    const joined = parts.join("").trim()
-    if (joined) return joined
-  }
+
+function firstNonEmptyString(...vals: Array<any>): string | undefined {
+  for (const v of vals) if (typeof v === "string" && v.trim()) return v.trim()
   return undefined
 }
+
+// Extrai texto/JSON de todas as variantes da Responses API
+function extractResponsePayload(resp: any): { text?: string; json?: any } {
+  // 1) atalhos diretos
+  const t1 = typeof resp?.output_text === "string" ? resp.output_text.trim() : ""
+  // 2) varre output[].content[]
+  let t2 = ""
+  let j1: any = undefined
+  const outputs = Array.isArray(resp?.output) ? resp.output : []
+  for (const o of outputs) {
+    const content = Array.isArray(o?.content) ? o.content : []
+    for (const c of content) {
+      if (typeof c?.text === "string" && c.text.trim()) t2 += c.text
+      if (typeof c?.type === "string") {
+        if (c.type === "output_text" && typeof c?.text === "string" && c.text.trim()) t2 += c.text
+        if (c.type === "text" && typeof c?.text === "string" && c.text.trim()) t2 += c.text
+        if (c.type === "json" && c?.json && typeof c.json === "object") j1 = c.json
+      }
+    }
+  }
+  const text = firstNonEmptyString(t1, t2)
+  return { text, json: j1 }
+}
+
 function isValidCaptionArray(arr: any): arr is CaptionResult[] {
   if (!Array.isArray(arr) || arr.length < 1) return false
   return arr.every((item) =>
@@ -76,7 +91,7 @@ function isValidCaptionArray(arr: any): arr is CaptionResult[] {
   )
 }
 
-// ---------- OpenAI call (timeout + retries) ----------
+// ===== OpenAI (timeout + retries) =====
 async function callOpenAIWithRetries(payload: any, opts?: { retries?: number; timeoutMs?: number }) {
   const retries = Math.max(0, opts?.retries ?? 2)
   const timeoutMs = Math.max(1_000, opts?.timeoutMs ?? 25_000)
@@ -104,7 +119,6 @@ async function callOpenAIWithRetries(payload: any, opts?: { retries?: number; ti
         await sleep(backoff)
         continue
       }
-
       const body = await safeJson(res)
       throw new Error(body?.error?.message || `OpenAI HTTP ${res.status}`)
     } catch (err: any) {
@@ -121,7 +135,7 @@ async function callOpenAIWithRetries(payload: any, opts?: { retries?: number; ti
   throw new Error(toErrorMessage(lastErr) || "Falha ao chamar OpenAI após retries")
 }
 
-// ---------- handler ----------
+// ===== Handler =====
 export async function POST(request: Request) {
   try {
     const supabase = await createClient()
@@ -174,32 +188,47 @@ export async function POST(request: Request) {
       `Cada legenda deve ter: 1–3 emojis, 1 linha de CTA e 5 hashtags relevantes.\n` +
       `Responda APENAS um JSON com a propriedade "results" contendo um array de objetos { "caption": string, "cta": string, "hashtags": string[] }.`
 
-    // ✅ Responses API — text.format como OBJETO com type aceito
-    const payload = {
+    // 1ª tentativa: saída como JSON-obj (modelo deve devolver objeto)
+    const payloadPrimary = {
       model: MODEL(),
       instructions: "Responda exclusivamente com JSON válido.",
-      input: [{ role: "user", content: userPrompt }],
+      input: userPrompt,                   // usar string simples ajuda alguns modelos
       max_output_tokens: 1000,
-      text: { format: { type: "json_object" } }, // <- 'json_object' é aceito
+      text: { format: { type: "json_object" } },
     }
 
-    const ai = await callOpenAIWithRetries(payload, { retries: 2, timeoutMs: 25_000 })
+    let ai = await callOpenAIWithRetries(payloadPrimary, { retries: 1, timeoutMs: 25_000 })
+    let { text: outText, json: outJson } = extractResponsePayload(ai)
 
-    // extrai texto
-    const raw = extractResponseText(ai)
-    if (!raw) throw new Error("Resposta vazia da IA")
+    // Fallback: se o modelo não preencher, tenta como texto livre e extrai JSON do texto
+    if (!outText && !outJson) {
+      const payloadFallback = {
+        model: MODEL(),
+        instructions: "Responda exatamente com um JSON válido (sem comentários, sem markdown).",
+        input: userPrompt,
+        max_output_tokens: 1000,
+        text: { format: { type: "text" } },
+      }
+      ai = await callOpenAIWithRetries(payloadFallback, { retries: 1, timeoutMs: 25_000 })
+      ;({ text: outText, json: outJson } = extractResponsePayload(ai))
+    }
 
-    // parse + valida shape
+    if (!outText && !outJson) {
+      console.error("[caption] empty model output", ai)
+      throw new Error("Resposta vazia da IA")
+    }
+
+    // Parse + validação
     let results: CaptionResult[]
     try {
-      const text = stripCodeFences(raw)
-      const parsed = JSON.parse(text) as { results?: unknown }
-      const arr = (parsed && (parsed as any).results) ?? null
-      if (!isValidCaptionArray(arr))
+      const parsedRoot = outJson ?? JSON.parse(stripCodeFences(outText!))
+      const arr = parsedRoot?.results
+      if (!isValidCaptionArray(arr)) {
         throw new Error("JSON não corresponde ao formato esperado (object.results[])")
+      }
       results = arr as CaptionResult[]
     } catch (e) {
-      console.error("[caption] JSON parse error", { raw, error: toErrorMessage(e) })
+      console.error("[caption] JSON parse/shape error", { raw: outText ?? outJson, error: toErrorMessage(e) })
       throw new Error("Erro ao processar resposta da IA (JSON inválido)")
     }
 
@@ -210,7 +239,7 @@ export async function POST(request: Request) {
       ((usage?.output_tokens ?? 0) + (usage?.input_tokens ?? 0))
     const costEstimate = (tokensUsed / 1_000_000) * 0.45
 
-    // debita 1 crédito (não-admin)
+    // débito de crédito
     let creditsRemaining = userData.credits
     if (!isAdmin) {
       const newCredits = Math.max(0, (userData.credits ?? 0) - 1)
@@ -222,7 +251,7 @@ export async function POST(request: Request) {
       creditsRemaining = newCredits
     }
 
-    // persiste primeiro resultado
+    // persistência do primeiro resultado
     try {
       const first = results[0]
       if (first) {

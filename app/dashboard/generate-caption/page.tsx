@@ -28,11 +28,11 @@ interface CaptionResult {
 
 // ===== Constantes =====
 const RESPONSES_ENDPOINT = "https://api.openai.com/v1/responses"
-const MODEL = () => config.openai.models.caption // ex.: "gpt-5-nano"
+const MODEL = () => config.openai.models.caption // "gpt-5-nano" etc.
 const MAX_VARIATIONS = 10
 const MIN_VARIATIONS = 1
 
-// Nano: saídas curtíssimas
+// Saída curtíssima por variação
 const MAX_OUTPUT_TOKENS_SCHEMA = 200
 const MAX_OUTPUT_TOKENS_TEXT   = 240
 const MAX_OUTPUT_TOKENS_PLAIN  = 260
@@ -78,15 +78,19 @@ function tryParseLoose(raw: string): any | undefined {
   return undefined
 }
 
-// Extrai texto/JSON do Responses API (e detecta reasoning-only)
+// Extrai texto/JSON do Responses API
 function extractResponsePayload(resp: any): { text?: string; json?: any; onlyReasoning?: boolean } {
   let textConcat = ""
   let firstJson: any
   let sawTextOrJson = false
   let reasoningCount = 0
 
-  const takeText = (s?: string) => { if (typeof s === "string" && s.trim()) { textConcat += s; sawTextOrJson = true } }
-  const takeJson = (j: any) => { if (!firstJson && j && typeof j === "object") { firstJson = j; sawTextOrJson = true } }
+  const takeText = (s?: string) => {
+    if (typeof s === "string" && s.trim()) { textConcat += s; sawTextOrJson = true }
+  }
+  const takeJson = (j: any) => {
+    if (!firstJson && j && typeof j === "object") { firstJson = j; sawTextOrJson = true }
+  }
 
   if (typeof resp?.output_text === "string") takeText(resp.output_text)
 
@@ -120,6 +124,7 @@ function extractResponsePayload(resp: any): { text?: string; json?: any; onlyRea
     scanContent(content)
   }
 
+  // fallback duro
   if (!sawTextOrJson && outs.length > 0) firstJson = outs[0]
 
   return {
@@ -169,7 +174,7 @@ const captionJsonSchema = {
   }
 } as const
 
-// (1) Schema + desliga reasoning/tools
+// (1) Schema + desabilitar reasoning & tools
 const payloadSchema = (prompt: string) => ({
   model: MODEL(),
   instructions: "Devolva somente JSON que satisfaça o schema. Não explique. Não use markdown.",
@@ -197,7 +202,7 @@ const payloadText = (prompt: string) => ({
 const payloadPlain = (prompt: string) => ({
   model: MODEL(),
   instructions: `Apenas JSON válido: {"caption":"","cta":"","hashtags":["#a","#b","#c"]}. Sem markdown ou explicações.`,
-  input: prompt, // string simples (não array)
+  input: prompt, // string simples
   max_output_tokens: MAX_OUTPUT_TOKENS_PLAIN,
   tool_choice: "none",
   modalities: ["text"],
@@ -205,18 +210,28 @@ const payloadPlain = (prompt: string) => ({
   text: { format: { type: "text" as const } },
 })
 
-// ===== Fallback final: gera legenda via template (sem IA) =====
+// ===== Fallback final: gerar legenda via template (sem IA) =====
 function templateCaption(desc: string, goal: string): CaptionResult {
   const core = desc.replace(/\s+/g, " ").trim().slice(0, 60)
-  const caption = `${core} que conecta de verdade. ✨`.replace(/\s{2,}/g, " ").trim().slice(0, 100)
-  const cta = goal && goal.toLowerCase().includes("venda") ? "Quer saber mais? Chame no direct." : "Comente o que achou!"
-  const base = core.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, "").split(/\s+/).filter(Boolean)
+  const caption = ` ${core} que conecta de verdade. ✨`
+    .replace(/\s{2,}/g, " ")
+    .trim()
+    .slice(0, 100)
+  const cta = goal && goal.toLowerCase().includes("venda")
+    ? "Quer saber mais? Chame no direct."
+    : "Comente o que achou!"
+  // hashtags bem curtas para caber
+  const base = core
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, "")
+    .split(/\s+/)
+    .filter(Boolean)
   const uniq = Array.from(new Set(base)).slice(0, 3)
   const hashtags = (uniq.length ? uniq : ["negocio", "brasil", "dicas"]).map(h => `#${h}`)
   return { caption, cta, hashtags }
 }
 
-// ===== Gera UMA variação (com fallbacks) =====
+// ===== Gera UMA variação =====
 async function generateOneVariation(desc: string, tone: string, platform: string, goal: string): Promise<CaptionResult> {
   const prompt = promptOne(desc, tone, platform, goal)
 
@@ -251,7 +266,7 @@ async function generateOneVariation(desc: string, tone: string, platform: string
     return templateCaption(desc, goal)
   }
 
-  // 6) normaliza
+  // 6) normaliza objeto final
   let item: any = root
   if (item && typeof item === "object") {
     if (Array.isArray(item.results) && item.results.length) item = item.results[0]
@@ -265,10 +280,11 @@ async function generateOneVariation(desc: string, tone: string, platform: string
     }
   }
   if (!isValidCaption(item)) {
-    // último recurso: sem erro 500
+    // último recurso, mas sem erro 500
     return templateCaption(desc, goal)
   }
 
+  // força prefixo "#"
   const hashtags = item.hashtags.map((h: string) => (h.startsWith("#") ? h : `#${h.replace(/\s+/g, "")}`))
   return { caption: String(item.caption).trim(), cta: String(item.cta).trim(), hashtags }
 }
@@ -312,7 +328,7 @@ export async function POST(request: Request) {
         const one = await generateOneVariation(businessDescription, tone, platform, goal)
         results.push(one)
       } catch (err) {
-        // 1 retry para essa posição
+        // mais 1 retry para essa posição
         try {
           const one = await generateOneVariation(businessDescription, tone, platform, goal)
           results.push(one)
@@ -323,7 +339,7 @@ export async function POST(request: Request) {
       }
     }
     if (results.length === 0) {
-      // nunca 500 — sempre retorna algo válido
+      // nunca retornar 500 — garante pelo menos 1 via template
       results.push(templateCaption(businessDescription, goal))
     }
 
@@ -350,9 +366,7 @@ export async function POST(request: Request) {
           credits_used: isAdmin ? 0 : 1,
         })
       }
-    } catch (err) {
-      console.error("Erro ao salvar post:", toErr(err))
-    }
+    } catch {}
 
     // log (opcional)
     try {
@@ -368,9 +382,7 @@ export async function POST(request: Request) {
           strategy: "schema→text→plain + template-fallback",
         },
       })
-    } catch (err) {
-      console.error("Erro ao registrar uso:", toErr(err))
-    }
+    } catch {}
 
     return NextResponse.json({
       results,

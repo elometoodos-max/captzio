@@ -32,12 +32,15 @@ const RESPONSES_ENDPOINT = "https://api.openai.com/v1/responses"
 const MODEL = () => config.openai.models.caption // ex.: "gpt-5-nano"
 const MAX_VARIATIONS = 10
 const MIN_VARIATIONS = 1
-const MAX_TOKENS_PRIMARY = 900   // manter abaixo de 1000 para nano
-const MAX_TOKENS_FALLBACK = 700  // em fallback, economizamos mais
 
-// ===== Utils de texto/JSON =====
+// Para Nano, mantenha a saída pequena por chamada:
+const MAX_OUTPUT_TOKENS_JSON = 320  // pequeno e suficiente para 1 variação
+const MAX_OUTPUT_TOKENS_TEXT = 280  // fallback em "text"
+
+// ===== Utils =====
 const clamp = (n: number, min: number, max: number) => Math.min(Math.max(n, min), max)
-const slice = (s: string, n = 300) => (s && s.length > n ? s.slice(0, n) + "..." : s || "")
+const slice = (s: string, n = 280) => (s && s.length > n ? s.slice(0, n) + "..." : s || "")
+const toErr = (e: unknown) => (e instanceof Error ? e.message : (()=>{try{return JSON.stringify(e)}catch{return String(e)}})())
 
 function stripCodeFences(s: string): string {
   const m = s.match(/```json\s*([\s\S]*?)```/i) || s.match(/```\s*([\s\S]*?)```/i)
@@ -65,35 +68,21 @@ function isValidCaption(item: any): item is CaptionResult {
     item.hashtags.every((h: any) => typeof h === "string" && h.trim())
   )
 }
-function isValidCaptionArray(arr: any): arr is CaptionResult[] {
-  return Array.isArray(arr) && arr.length > 0 && arr.every(isValidCaption)
-}
-function findCaptionsAnywhere(root: any): CaptionResult[] | undefined {
-  if (!root) return
-  if (isValidCaptionArray(root)) return root
-  if (isValidCaptionArray((root as any).results)) return (root as any).results
-  if (isValidCaptionArray((root as any).items)) return (root as any).items
-  if (isValidCaption(root)) return [root]
-  if (Array.isArray(root)) {
-    for (const v of root) {
-      const f = findCaptionsAnywhere(v)
-      if (f) return f
-    }
-  } else if (typeof root === "object") {
-    for (const k of Object.keys(root)) {
-      const f = findCaptionsAnywhere((root as any)[k])
-      if (f) return f
-    }
-  }
-  return
+
+function tryParseLoose(raw: string): any | undefined {
+  let t = stripCodeFences(raw)
+  t = normalizeQuotes(t)
+  try { return JSON.parse(t) } catch {}
+  try { return JSON.parse(removeTrailingCommas(t)) } catch {}
+  try { return JSON.parse(coerceSingleToDoubleQuotes(removeTrailingCommas(t))) } catch {}
+  return undefined
 }
 
+// Extrai texto/JSON em qualquer formato razoável
 function extractResponsePayload(resp: any): { text?: string; json?: any } {
-  // 1) output_text direto
   if (typeof resp?.output_text === "string" && resp.output_text.trim()) {
     return { text: resp.output_text.trim() }
   }
-  // 2) varre output[].content[]
   let textConcat = ""
   let firstJson: any
   const outs = Array.isArray(resp?.output) ? resp.output : []
@@ -106,89 +95,113 @@ function extractResponsePayload(resp: any): { text?: string; json?: any } {
       if (typeof c?.output_text === "string" && c.output_text.trim()) textConcat += c.output_text
     }
   }
-  if (!textConcat && !firstJson && outs.length > 0) {
-    // Fallback duro: usa o objeto do output como JSON bruto
-    firstJson = outs[0]
-  }
+  if (!textConcat && !firstJson && outs.length > 0) firstJson = outs[0]
   const text = textConcat.trim() || undefined
   return { text, json: firstJson }
 }
 
-function tryParseLoose(raw: string): any | undefined {
-  let t = stripCodeFences(raw)
-  t = normalizeQuotes(t)
-  // 1) direto
-  try { return JSON.parse(t) } catch {}
-  // 2) remove vírgulas finais
-  try { return JSON.parse(removeTrailingCommas(t)) } catch {}
-  // 3) aspas simples → duplas
-  try { return JSON.parse(coerceSingleToDoubleQuotes(removeTrailingCommas(t))) } catch {}
-  return undefined
-}
-
-// ===== OpenAI (Responses API) =====
-async function callOpenAI(payload: any, timeoutMs = 25000) {
+async function callOpenAI(payload: any, timeoutMs = 20000) {
   const ac = new AbortController()
   const timer = setTimeout(() => ac.abort(), timeoutMs)
   try {
     const res = await fetch(RESPONSES_ENDPOINT, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${config.openai.apiKey}`,
-      },
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${config.openai.apiKey}` },
       body: JSON.stringify(payload),
       signal: ac.signal,
     })
     const body = await res.json().catch(() => ({}))
-    if (!res.ok) {
-      throw new Error((body as any)?.error?.message || `OpenAI HTTP ${res.status}`)
-    }
+    if (!res.ok) throw new Error((body as any)?.error?.message || `OpenAI HTTP ${res.status}`)
     return body
   } finally {
     clearTimeout(timer)
   }
 }
 
-// ===== Payload builders =====
-function makePrompt(desc: string, tone: string, platform: string, goal: string, n: number) {
-  // Enxuto e com limites de tamanho para não estourar tokens:
+// ===== Prompt e payloads (1 variação por chamada) =====
+function makePromptOne(desc: string, tone: string, platform: string, goal: string) {
   return (
-    `Gere ${n} legendas PT-BR para: ${desc}.\n` +
-    `Tom: ${tone || "neutro/profissional"} | Plataforma: ${platform || "Instagram"} | Objetivo: ${goal || "engajamento"}.\n` +
-    `Regras (curtas): cada "caption" ≤ 180 chars; "cta" 1 linha; 5 hashtags curtas. ` +
-    `Retorne APENAS JSON: {"results":[{"caption":"","cta":"","hashtags":["#...","#...","#...","#...","#..."]}]}`
+    `Gere 1 legenda PT-BR.\n` +
+    `Negócio: ${desc}\n` +
+    `Tom: ${tone || "neutro/profissional"} | Plataforma: ${platform || "Instagram"} | Objetivo: ${goal || "engajamento"}\n` +
+    `Formato JSON EXATO: {"caption":"(≤180 chars)","cta":"(1 linha)","hashtags":["#tag1","#tag2","#tag3","#tag4","#tag5"]}\n` +
+    `Não inclua markdown. Apenas JSON.`
   )
 }
 
-const payloadJsonObj = (prompt: string, maxTokens: number) => ({
+const payloadJsonObj = (prompt: string) => ({
   model: MODEL(),
-  instructions: "Retorne somente JSON válido e completo.",
+  instructions: "Retorne exclusivamente um JSON válido e completo.",
   input: [{ role: "user", content: [{ type: "input_text", text: prompt }] }],
-  max_output_tokens: maxTokens,
+  max_output_tokens: MAX_OUTPUT_TOKENS_JSON,
   text: { format: { type: "json_object" } },
 })
 
-const payloadText = (prompt: string, maxTokens: number) => ({
+const payloadText = (prompt: string) => ({
   model: MODEL(),
-  instructions: "Retorne um JSON válido e completo (sem markdown).",
+  instructions: "Retorne exclusivamente um JSON válido e completo (sem markdown).",
   input: [{ role: "user", content: [{ type: "input_text", text: prompt }] }],
-  max_output_tokens: maxTokens,
+  max_output_tokens: MAX_OUTPUT_TOKENS_TEXT,
   text: { format: { type: "text" } },
 })
 
-// ===== Uma rodada de geração, com política de fallback =====
-async function generateOnce(prompt: string, opts: { maxTokens: number; format: "json_object" | "text" }) {
-  const payload = opts.format === "json_object"
-    ? payloadJsonObj(prompt, opts.maxTokens)
-    : payloadText(prompt, opts.maxTokens)
+// Gera UMA variação (com fallback) e retorna CaptionResult
+async function generateOneVariation(desc: string, tone: string, platform: string, goal: string): Promise<CaptionResult> {
+  const prompt = makePromptOne(desc, tone, platform, goal)
 
-  const ai = await callOpenAI(payload)
-  const status: string | undefined = ai?.status
-  const incompleteReason: string | undefined = ai?.incomplete_details?.reason
+  // 1) Tenta json_object (ideal)
+  let ai = await callOpenAI(payloadJsonObj(prompt))
+  let status: string | undefined = ai?.status
+  let reason: string | undefined = ai?.incomplete_details?.reason
+  let { text, json } = extractResponsePayload(ai)
 
-  const { text, json } = extractResponsePayload(ai)
-  return { ai, text, json, status, incompleteReason }
+  // Se truncou/incompleto, tenta em "text" (saída menor)
+  if (status !== "completed" && (reason === "max_output_tokens" || (!text && !json))) {
+    ai = await callOpenAI(payloadText(prompt))
+    status = ai?.status
+    reason = ai?.incomplete_details?.reason
+    const p = extractResponsePayload(ai)
+    text = p.text
+    json = p.json
+  }
+
+  // Decodifica
+  let root: any = json
+  if (!root && text) {
+    root = tryParseLoose(text)
+  }
+  if (!root) {
+    const diag = `status=${status || "?"}, reason=${reason || "?"}`
+    throw new Error(`Falha ao decodificar variação (JSON inválido) — ${diag}, preview: ${slice(text || JSON.stringify(json) || "", 220)}`)
+  }
+
+  // Normaliza possíveis formatos
+  let item: any = root
+  if (root && typeof root === "object") {
+    if (Array.isArray(root.results) && root.results.length > 0) item = root.results[0]
+    else if (Array.isArray(root.items) && root.items.length > 0) item = root.items[0]
+  }
+  if (!isValidCaption(item)) {
+    // Alguns modelos devolvem {caption, cta, hashtags} diretamente
+    // ou o objeto está dentro de algum campo; vasculha superficialmente:
+    if (root && typeof root === "object") {
+      for (const k of Object.keys(root)) {
+        const v = (root as any)[k]
+        if (isValidCaption(v)) { item = v; break }
+      }
+    }
+  }
+  if (!isValidCaption(item)) {
+    throw new Error(`Modelo não retornou campos válidos — preview: ${slice(typeof root === "string" ? root : JSON.stringify(root), 220)}`)
+  }
+
+  // Força hashtags começarem com "#"
+  item.hashtags = item.hashtags.map((h: string) => (h.startsWith("#") ? h : `#${h.replace(/\s+/g, "")}`))
+  return {
+    caption: String(item.caption).trim(),
+    cta: String(item.cta).trim(),
+    hashtags: item.hashtags,
+  }
 }
 
 // ===== Handler principal =====
@@ -200,73 +213,55 @@ export async function POST(request: Request) {
     const { data: { user }, error: authError } = await supabase.auth.getUser()
     if (authError || !user) throw new AuthenticationError()
 
-    // rate limit
+    // rate limit (10/h)
     const rateLimit = checkRateLimit(`caption:${user.id}`, 10, 3600000)
     if (!rateLimit.allowed) throw new RateLimitError(rateLimit.resetAt)
 
-    // usuário
+    // usuário + créditos
     const { data: userData, error: userError } = await supabase.from("users").select("*").eq("id", user.id).single()
     if (userError || !userData) throw new NotFoundError("Usuário")
     const isAdmin = userData.role === "admin" || user.email === config.admin.email
 
-    // body
+    // body + validação
     const body: CaptionRequest = await request.json()
     const validation = validateCaptionRequest(body)
     if (!validation.valid) throw new ValidationError(validation.error!)
 
-    let tone = String(body.tone || "").trim()
-    let platform = String(body.platform || "").trim()
-    const businessDescription = String(body.businessDescription || "").trim()
-    let goal = String(body.goal || "").trim()
-    let n = clamp(Number(body.numVariations || 1), MIN_VARIATIONS, MAX_VARIATIONS)
+    const tone = sanitizeInput(String(body.tone || "").trim())
+    const platform = sanitizeInput(String(body.platform || "").trim())
+    const businessDescription = sanitizeInput(String(body.businessDescription || "").trim())
+    const goal = sanitizeInput(String(body.goal || "").trim())
+    const numVariations = clamp(Number(body.numVariations || 1), MIN_VARIATIONS, MAX_VARIATIONS)
 
     if (!isAdmin && (userData.credits ?? 0) < 1) throw new InsufficientCreditsError(1, userData.credits ?? 0)
 
-    const desc = sanitizeInput(businessDescription)
-    tone = sanitizeInput(tone)
-    platform = sanitizeInput(platform)
-    goal = sanitizeInput(goal)
-
-    // ===== Tentativa 1: json_object, n original =====
-    let prompt = makePrompt(desc, tone, platform, goal, n)
-    let r1 = await generateOnce(prompt, { maxTokens: MAX_TOKENS_PRIMARY, format: "json_object" })
-
-    // Se truncou por max_output_tokens, reduzimos n e tentamos de novo
-    if (r1.status !== "completed" && (r1.incompleteReason === "max_output_tokens" || !r1.text && !r1.json)) {
-      n = Math.max(1, Math.floor(n / 2)) // reduz pela metade
-      prompt = makePrompt(desc, tone, platform, goal, n)
-      r1 = await generateOnce(prompt, { maxTokens: MAX_TOKENS_FALLBACK, format: "json_object" })
+    // ===== Geração iterativa: 1 variação por chamada interna =====
+    const results: CaptionResult[] = []
+    for (let i = 0; i < numVariations; i++) {
+      try {
+        const one = await generateOneVariation(businessDescription, tone, platform, goal)
+        results.push(one)
+      } catch (err) {
+        // Se uma variação falhar, tenta mais uma vez para essa posição em "text"
+        try {
+          const one = await generateOneVariation(businessDescription, tone, platform, goal)
+          results.push(one)
+        } catch (err2) {
+          // Para Nano, não estoura a requisição inteira por 1 falha; segue adiante.
+          // Mas se nenhuma variação foi gerada, propaga o erro.
+          if (results.length === 0) throw err2
+          break
+        }
+      }
+    }
+    if (results.length === 0) {
+      throw new Error("Não foi possível gerar nenhuma legenda (modelo retornou saída vazia ou inválida).")
     }
 
-    // Se ainda vier incompleto, troca para TEXT (menos overhead) e mantém n reduzido
-    if (r1.status !== "completed" && (r1.incompleteReason === "max_output_tokens" || !r1.text && !r1.json)) {
-      r1 = await generateOnce(prompt, { maxTokens: MAX_TOKENS_FALLBACK, format: "text" })
-    }
+    // uso/custo (sem acesso a usage somado por variação — use estimativa simples ou zere)
+    const costEstimate = 0 // se quiser estimar tokens, você pode acumular usage de cada chamada
 
-    const ai = r1.ai
-    let root = r1.json
-    if (!root && r1.text) {
-      const t = normalizeQuotes(removeTrailingCommas(stripCodeFences(r1.text)))
-      root = tryParseLoose(t)
-    }
-
-    if (!root) {
-      const diag = `status=${ai?.status || "?"}, reason=${ai?.incomplete_details?.reason || "?"}, output.len=${Array.isArray(ai?.output) ? ai.output.length : 0}`
-      throw new Error(`Erro ao processar resposta da IA (JSON inválido) — diag: ${diag}, preview: ${slice(r1.text || JSON.stringify(r1.json) || "", 260)}`)
-    }
-
-    const results = findCaptionsAnywhere(root)
-    if (!results) {
-      const diag = `status=${ai?.status || "?"}, reason=${ai?.incomplete_details?.reason || "?"}`
-      throw new Error(`Erro ao processar resposta da IA (JSON inválido) — ${diag}, preview: ${slice(r1.text || JSON.stringify(root) || "", 260)}`)
-    }
-
-    // uso/custo (estimativa simples)
-    const usage = ai?.usage ?? {}
-    const tokensUsed = usage?.total_tokens ?? ((usage?.output_tokens ?? 0) + (usage?.input_tokens ?? 0))
-    const costEstimate = (tokensUsed / 1_000_000) * 0.45
-
-    // créditos
+    // Debita 1 crédito total por requisição HTTP
     let creditsRemaining = userData.credits
     if (!isAdmin) {
       const newCredits = Math.max(0, (userData.credits ?? 0) - 1)
@@ -275,7 +270,7 @@ export async function POST(request: Request) {
       creditsRemaining = newCredits
     }
 
-    // persiste primeiro
+    // salva o primeiro resultado
     try {
       const first = results[0]
       if (first) {
@@ -291,7 +286,7 @@ export async function POST(request: Request) {
       }
     } catch {}
 
-    // log
+    // log (opcional)
     try {
       await supabase.from("usage_logs").insert({
         user_id: user.id,
@@ -299,8 +294,10 @@ export async function POST(request: Request) {
         credits_used: isAdmin ? 0 : 1,
         cost_usd: costEstimate,
         metadata: {
-          tone, platform, goal, tokensUsed, model: MODEL(), numVariations: n,
-          rateLimit: { remaining: rateLimit.remaining, resetAt: rateLimit.resetAt },
+          tone, platform, goal,
+          model: MODEL(),
+          numVariations,
+          strategy: "per-variation-calls",
         },
       })
     } catch {}

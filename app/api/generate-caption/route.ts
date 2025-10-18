@@ -31,9 +31,9 @@ const MIN_VARIATIONS = 1
 const RESPONSES_ENDPOINT = "https://api.openai.com/v1/responses"
 const MODEL = () => config.openai.models.caption // ex.: "gpt-5-nano"
 
-// ----------------- utils básicas -----------------
+// ---------------- utils ----------------
 const clamp = (n: number, min: number, max: number) => Math.min(Math.max(n, min), max)
-const slice = (s: string, n = 350) => (s.length > n ? s.slice(0, n) + "..." : s)
+const slice = (s: string, n = 350) => (s && s.length > n ? s.slice(0, n) + "..." : s || "")
 
 function stripCodeFences(s: string): string {
   const m = s.match(/```json\s*([\s\S]*?)```/i) || s.match(/```\s*([\s\S]*?)```/i)
@@ -46,54 +46,9 @@ function removeTrailingCommas(s: string): string {
   return s.replace(/,\s*([}\]])/g, "$1")
 }
 function coerceSingleToDoubleQuotes(s: string): string {
-  s = s.replace(/'(\w+?)'\s*:/g, '"$1":')     // 'key': -> "key":
-  s = s.replace(/:\s*'([^']*)'/g, ': "$1"')   // : 'val' -> : "val"
+  s = s.replace(/'(\w+?)'\s*:/g, '"$1":')
+  s = s.replace(/:\s*'([^']*)'/g, ': "$1"')
   return s
-}
-
-// Encontra o MAIOR bloco JSON plausível em uma string (usa pilha)
-function findLargestJsonBlock(text: string): string | undefined {
-  const idxs: Array<{start: number; end: number}> = []
-  const openers = ['{', '[']
-  const closers: Record<string, string> = { '{': '}', '[': ']' }
-
-  for (let pass = 0; pass < 2; pass++) {
-    const opener = openers[pass]
-    const closer = closers[opener]
-    let stack: number[] = []
-    for (let i = 0; i < text.length; i++) {
-      const ch = text[i]
-      if (ch === opener) stack.push(i)
-      else if (ch === closer && stack.length) {
-        const start = stack.pop()!
-        if (stack.length === 0) idxs.push({ start, end: i + 1 })
-      }
-    }
-  }
-  if (!idxs.length) return undefined
-  // pega o maior intervalo
-  idxs.sort((a,b) => (b.end - b.start) - (a.end - a.start))
-  const best = idxs[0]
-  return text.slice(best.start, best.end)
-}
-
-function tryParseLoose(raw: string): any | undefined {
-  let t = stripCodeFences(raw)
-  t = normalizeQuotes(t)
-  // 1) direto
-  try { return JSON.parse(t) } catch {}
-  // 2) remove vírgulas finais
-  try { return JSON.parse(removeTrailingCommas(t)) } catch {}
-  // 3) converte aspas simples
-  try { return JSON.parse(coerceSingleToDoubleQuotes(removeTrailingCommas(t))) } catch {}
-  // 4) detecta maior bloco JSON e tenta de novo
-  const block = findLargestJsonBlock(t)
-  if (block) {
-    try { return JSON.parse(block) } catch {}
-    try { return JSON.parse(removeTrailingCommas(block)) } catch {}
-    try { return JSON.parse(coerceSingleToDoubleQuotes(removeTrailingCommas(block))) } catch {}
-  }
-  return undefined
 }
 
 function isValidCaption(item: any): item is CaptionResult {
@@ -109,6 +64,7 @@ function isValidCaption(item: any): item is CaptionResult {
 function isValidCaptionArray(arr: any): arr is CaptionResult[] {
   return Array.isArray(arr) && arr.length > 0 && arr.every(isValidCaption)
 }
+
 function findCaptionsAnywhere(root: any): CaptionResult[] | undefined {
   if (!root) return
   if (isValidCaptionArray(root)) return root
@@ -129,30 +85,64 @@ function findCaptionsAnywhere(root: any): CaptionResult[] | undefined {
   return
 }
 
-// ----------------- extração do Responses API -----------------
-function extractResponsePayload(resp: any): { text?: string; json?: any } {
-  // 1) output_text direto
-  if (typeof resp?.output_text === "string" && resp.output_text.trim()) {
-    return { text: resp.output_text.trim() }
-  }
-  // 2) varre output[].content[]
-  let textConcat = ""
-  let firstJson: any
-  const outs = Array.isArray(resp?.output) ? resp.output : []
-  for (const o of outs) {
-    const content = Array.isArray(o?.content) ? o.content : []
-    for (const c of content) {
-      if (typeof c?.text === "string" && c.text.trim()) textConcat += c.text
-      if (!firstJson && c?.json && typeof c.json === "object") firstJson = c.json
-      if (!firstJson && c?.object && typeof c.object === "object") firstJson = c.object
-      if (typeof c?.output_text === "string" && c.output_text.trim()) textConcat += c.output_text
+// --------- Responses API extractors ---------
+type Extracted = { text?: string; json?: any }
+
+/**
+ * Tenta extrair texto/JSON de toda a estrutura conhecida da Responses API.
+ * NOVO: se nada encontrado mas houver `output`, usa o próprio `output` (ou o item 0) como JSON bruto.
+ */
+function extractResponsePayload(resp: any): Extracted {
+  const out: Extracted = {}
+  const texts: string[] = []
+
+  const visit = (node: any) => {
+    if (!node) return
+    if (typeof node === "string") {
+      const t = node.trim()
+      if (t) texts.push(t)
+      return
+    }
+    if (Array.isArray(node)) {
+      for (const v of node) visit(v)
+      return
+    }
+    if (typeof node === "object") {
+      if (typeof (node as any).text === "string" && (node as any).text.trim()) texts.push((node as any).text.trim())
+      if (!out.json && (node as any).json && typeof (node as any).json === "object") out.json = (node as any).json
+      if (!out.json && (node as any).object && typeof (node as any).object === "object") out.json = (node as any).object
+      if (!out.json && (node as any).data && typeof (node as any).data === "object") out.json = (node as any).data
+      if (!out.json && (node as any).result && typeof (node as any).result === "object") out.json = (node as any).result
+      if (typeof (node as any).output_text === "string" && (node as any).output_text.trim()) texts.push((node as any).output_text.trim())
+      for (const k of Object.keys(node)) visit((node as any)[k])
     }
   }
-  const text = textConcat.trim() || undefined
-  return { text, json: firstJson }
+  visit(resp)
+
+  // fallback duro: se nada encontrado e houver output, usa output bruto:
+  if (!out.text && !out.json && Array.isArray(resp?.output) && resp.output.length > 0) {
+    // alguns modelos devolvem tudo estruturado dentro desse objeto
+    out.json = resp.output[0] ?? resp.output
+  }
+
+  const joined = texts.join("").trim()
+  if (joined) out.text = joined
+  return out
 }
 
-// ----------------- OpenAI (Responses API) -----------------
+function tryParseLoose(raw: string): any | undefined {
+  let t = stripCodeFences(raw)
+  t = normalizeQuotes(t)
+  // 1) direto
+  try { return JSON.parse(t) } catch {}
+  // 2) remove vírgulas finais
+  try { return JSON.parse(removeTrailingCommas(t)) } catch {}
+  // 3) converte aspas simples heurístico
+  try { return JSON.parse(coerceSingleToDoubleQuotes(removeTrailingCommas(t))) } catch {}
+  return undefined
+}
+
+// --------- OpenAI (Responses API) ---------
 async function callOpenAI(payload: any, timeoutMs = 25000) {
   const ac = new AbortController()
   const timer = setTimeout(() => ac.abort(), timeoutMs)
@@ -191,7 +181,7 @@ const payloadText = (prompt: string) => ({
   text: { format: { type: "text" } },
 })
 
-// ----------------- handler -----------------
+// ---------------- handler ----------------
 export async function POST(request: Request) {
   try {
     const supabase = await createClient()
@@ -249,11 +239,11 @@ export async function POST(request: Request) {
       throw new Error(`Resposta vazia da IA (diag: ${diag})`)
     }
 
-    // --------- parse robusto ---------
+    // --------- parse final ---------
     let root: any = json
-    if (!root) {
-      const txt = normalizeQuotes(removeTrailingCommas(stripCodeFences(text!)))
-      root = tryParseLoose(txt)
+    if (!root && text) {
+      const t = normalizeQuotes(removeTrailingCommas(stripCodeFences(text)))
+      root = tryParseLoose(t)
     }
     if (!root) {
       throw new Error(`Erro ao processar resposta da IA (JSON inválido) — preview: ${slice(text || JSON.stringify(json) || "", 220)}`)

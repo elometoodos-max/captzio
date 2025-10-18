@@ -13,6 +13,7 @@ import {
   RateLimitError,
 } from "@/lib/error-handler"
 
+// ===== Tipos =====
 interface CaptionRequest {
   businessDescription: string
   tone: string
@@ -26,14 +27,17 @@ interface CaptionResult {
   hashtags: string[]
 }
 
-const MAX_VARIATIONS = 10
-const MIN_VARIATIONS = 1
+// ===== Constantes =====
 const RESPONSES_ENDPOINT = "https://api.openai.com/v1/responses"
 const MODEL = () => config.openai.models.caption // ex.: "gpt-5-nano"
+const MAX_VARIATIONS = 10
+const MIN_VARIATIONS = 1
+const MAX_TOKENS_PRIMARY = 900   // manter abaixo de 1000 para nano
+const MAX_TOKENS_FALLBACK = 700  // em fallback, economizamos mais
 
-// ---------------- utils ----------------
+// ===== Utils de texto/JSON =====
 const clamp = (n: number, min: number, max: number) => Math.min(Math.max(n, min), max)
-const slice = (s: string, n = 350) => (s && s.length > n ? s.slice(0, n) + "..." : s || "")
+const slice = (s: string, n = 300) => (s && s.length > n ? s.slice(0, n) + "..." : s || "")
 
 function stripCodeFences(s: string): string {
   const m = s.match(/```json\s*([\s\S]*?)```/i) || s.match(/```\s*([\s\S]*?)```/i)
@@ -64,7 +68,6 @@ function isValidCaption(item: any): item is CaptionResult {
 function isValidCaptionArray(arr: any): arr is CaptionResult[] {
   return Array.isArray(arr) && arr.length > 0 && arr.every(isValidCaption)
 }
-
 function findCaptionsAnywhere(root: any): CaptionResult[] | undefined {
   if (!root) return
   if (isValidCaptionArray(root)) return root
@@ -85,49 +88,30 @@ function findCaptionsAnywhere(root: any): CaptionResult[] | undefined {
   return
 }
 
-// --------- Responses API extractors ---------
-type Extracted = { text?: string; json?: any }
-
-/**
- * Tenta extrair texto/JSON de toda a estrutura conhecida da Responses API.
- * NOVO: se nada encontrado mas houver `output`, usa o próprio `output` (ou o item 0) como JSON bruto.
- */
-function extractResponsePayload(resp: any): Extracted {
-  const out: Extracted = {}
-  const texts: string[] = []
-
-  const visit = (node: any) => {
-    if (!node) return
-    if (typeof node === "string") {
-      const t = node.trim()
-      if (t) texts.push(t)
-      return
-    }
-    if (Array.isArray(node)) {
-      for (const v of node) visit(v)
-      return
-    }
-    if (typeof node === "object") {
-      if (typeof (node as any).text === "string" && (node as any).text.trim()) texts.push((node as any).text.trim())
-      if (!out.json && (node as any).json && typeof (node as any).json === "object") out.json = (node as any).json
-      if (!out.json && (node as any).object && typeof (node as any).object === "object") out.json = (node as any).object
-      if (!out.json && (node as any).data && typeof (node as any).data === "object") out.json = (node as any).data
-      if (!out.json && (node as any).result && typeof (node as any).result === "object") out.json = (node as any).result
-      if (typeof (node as any).output_text === "string" && (node as any).output_text.trim()) texts.push((node as any).output_text.trim())
-      for (const k of Object.keys(node)) visit((node as any)[k])
+function extractResponsePayload(resp: any): { text?: string; json?: any } {
+  // 1) output_text direto
+  if (typeof resp?.output_text === "string" && resp.output_text.trim()) {
+    return { text: resp.output_text.trim() }
+  }
+  // 2) varre output[].content[]
+  let textConcat = ""
+  let firstJson: any
+  const outs = Array.isArray(resp?.output) ? resp.output : []
+  for (const o of outs) {
+    const content = Array.isArray(o?.content) ? o.content : []
+    for (const c of content) {
+      if (typeof c?.text === "string" && c.text.trim()) textConcat += c.text
+      if (!firstJson && c?.json && typeof c.json === "object") firstJson = c.json
+      if (!firstJson && c?.object && typeof c.object === "object") firstJson = c.object
+      if (typeof c?.output_text === "string" && c.output_text.trim()) textConcat += c.output_text
     }
   }
-  visit(resp)
-
-  // fallback duro: se nada encontrado e houver output, usa output bruto:
-  if (!out.text && !out.json && Array.isArray(resp?.output) && resp.output.length > 0) {
-    // alguns modelos devolvem tudo estruturado dentro desse objeto
-    out.json = resp.output[0] ?? resp.output
+  if (!textConcat && !firstJson && outs.length > 0) {
+    // Fallback duro: usa o objeto do output como JSON bruto
+    firstJson = outs[0]
   }
-
-  const joined = texts.join("").trim()
-  if (joined) out.text = joined
-  return out
+  const text = textConcat.trim() || undefined
+  return { text, json: firstJson }
 }
 
 function tryParseLoose(raw: string): any | undefined {
@@ -137,12 +121,12 @@ function tryParseLoose(raw: string): any | undefined {
   try { return JSON.parse(t) } catch {}
   // 2) remove vírgulas finais
   try { return JSON.parse(removeTrailingCommas(t)) } catch {}
-  // 3) converte aspas simples heurístico
+  // 3) aspas simples → duplas
   try { return JSON.parse(coerceSingleToDoubleQuotes(removeTrailingCommas(t))) } catch {}
   return undefined
 }
 
-// --------- OpenAI (Responses API) ---------
+// ===== OpenAI (Responses API) =====
 async function callOpenAI(payload: any, timeoutMs = 25000) {
   const ac = new AbortController()
   const timer = setTimeout(() => ac.abort(), timeoutMs)
@@ -166,22 +150,48 @@ async function callOpenAI(payload: any, timeoutMs = 25000) {
   }
 }
 
-const payloadJsonObj = (prompt: string) => ({
+// ===== Payload builders =====
+function makePrompt(desc: string, tone: string, platform: string, goal: string, n: number) {
+  // Enxuto e com limites de tamanho para não estourar tokens:
+  return (
+    `Gere ${n} legendas PT-BR para: ${desc}.\n` +
+    `Tom: ${tone || "neutro/profissional"} | Plataforma: ${platform || "Instagram"} | Objetivo: ${goal || "engajamento"}.\n` +
+    `Regras (curtas): cada "caption" ≤ 180 chars; "cta" 1 linha; 5 hashtags curtas. ` +
+    `Retorne APENAS JSON: {"results":[{"caption":"","cta":"","hashtags":["#...","#...","#...","#...","#..."]}]}`
+  )
+}
+
+const payloadJsonObj = (prompt: string, maxTokens: number) => ({
   model: MODEL(),
-  instructions: "Responda exclusivamente com JSON válido.",
+  instructions: "Retorne somente JSON válido e completo.",
   input: [{ role: "user", content: [{ type: "input_text", text: prompt }] }],
-  max_output_tokens: 1000,
+  max_output_tokens: maxTokens,
   text: { format: { type: "json_object" } },
 })
-const payloadText = (prompt: string) => ({
+
+const payloadText = (prompt: string, maxTokens: number) => ({
   model: MODEL(),
-  instructions: "Responda com um JSON válido (sem markdown).",
+  instructions: "Retorne um JSON válido e completo (sem markdown).",
   input: [{ role: "user", content: [{ type: "input_text", text: prompt }] }],
-  max_output_tokens: 1000,
+  max_output_tokens: maxTokens,
   text: { format: { type: "text" } },
 })
 
-// ---------------- handler ----------------
+// ===== Uma rodada de geração, com política de fallback =====
+async function generateOnce(prompt: string, opts: { maxTokens: number; format: "json_object" | "text" }) {
+  const payload = opts.format === "json_object"
+    ? payloadJsonObj(prompt, opts.maxTokens)
+    : payloadText(prompt, opts.maxTokens)
+
+  const ai = await callOpenAI(payload)
+  const status: string | undefined = ai?.status
+  const incompleteReason: string | undefined = ai?.incomplete_details?.reason
+
+  const { text, json } = extractResponsePayload(ai)
+  return { ai, text, json, status, incompleteReason }
+}
+
+// ===== Handler principal =====
 export async function POST(request: Request) {
   try {
     const supabase = await createClient()
@@ -195,8 +205,7 @@ export async function POST(request: Request) {
     if (!rateLimit.allowed) throw new RateLimitError(rateLimit.resetAt)
 
     // usuário
-    const { data: userData, error: userError } = await supabase
-      .from("users").select("*").eq("id", user.id).single()
+    const { data: userData, error: userError } = await supabase.from("users").select("*").eq("id", user.id).single()
     if (userError || !userData) throw new NotFoundError("Usuário")
     const isAdmin = userData.role === "admin" || user.email === config.admin.email
 
@@ -205,53 +214,51 @@ export async function POST(request: Request) {
     const validation = validateCaptionRequest(body)
     if (!validation.valid) throw new ValidationError(validation.error!)
 
-    const tone = String(body.tone || "").trim()
-    const platform = String(body.platform || "").trim()
+    let tone = String(body.tone || "").trim()
+    let platform = String(body.platform || "").trim()
     const businessDescription = String(body.businessDescription || "").trim()
-    const goal = String(body.goal || "").trim()
-    const numVariations = clamp(Number(body.numVariations || 1), MIN_VARIATIONS, MAX_VARIATIONS)
+    let goal = String(body.goal || "").trim()
+    let n = clamp(Number(body.numVariations || 1), MIN_VARIATIONS, MAX_VARIATIONS)
 
     if (!isAdmin && (userData.credits ?? 0) < 1) throw new InsufficientCreditsError(1, userData.credits ?? 0)
 
-    const sanitizedDescription = sanitizeInput(businessDescription)
-    const sanitizedGoal = sanitizeInput(goal)
+    const desc = sanitizeInput(businessDescription)
+    tone = sanitizeInput(tone)
+    platform = sanitizeInput(platform)
+    goal = sanitizeInput(goal)
 
-    const prompt =
-      `Você é um copywriter brasileiro especializado em redes sociais.\n` +
-      `Gere ${numVariations} variantes de legenda em português para: ${sanitizedDescription}.\n` +
-      `Tom: ${tone || "neutro/profissional"}.\nPlataforma: ${platform || "Instagram"}.\n` +
-      `Objetivo: ${sanitizedGoal || "engajamento e conversão"}.\n` +
-      `Cada legenda: 1–3 emojis, 1 linha de CTA e 5 hashtags relevantes.\n` +
-      `Responda APENAS um JSON com "results": [{ "caption": string, "cta": string, "hashtags": string[] }].`
+    // ===== Tentativa 1: json_object, n original =====
+    let prompt = makePrompt(desc, tone, platform, goal, n)
+    let r1 = await generateOnce(prompt, { maxTokens: MAX_TOKENS_PRIMARY, format: "json_object" })
 
-    // 1) tenta json_object
-    let ai = await callOpenAI(payloadJsonObj(prompt))
-    let { text, json } = extractResponsePayload(ai)
-
-    // 2) fallback texto
-    if (!text && !json) {
-      ai = await callOpenAI(payloadText(prompt))
-      ;({ text, json } = extractResponsePayload(ai))
+    // Se truncou por max_output_tokens, reduzimos n e tentamos de novo
+    if (r1.status !== "completed" && (r1.incompleteReason === "max_output_tokens" || !r1.text && !r1.json)) {
+      n = Math.max(1, Math.floor(n / 2)) // reduz pela metade
+      prompt = makePrompt(desc, tone, platform, goal, n)
+      r1 = await generateOnce(prompt, { maxTokens: MAX_TOKENS_FALLBACK, format: "json_object" })
     }
 
-    if (!text && !json) {
-      const diag = `keys=[${Object.keys(ai || {}).join(",")}], output.len=${Array.isArray(ai?.output) ? ai.output.length : 0}`
-      throw new Error(`Resposta vazia da IA (diag: ${diag})`)
+    // Se ainda vier incompleto, troca para TEXT (menos overhead) e mantém n reduzido
+    if (r1.status !== "completed" && (r1.incompleteReason === "max_output_tokens" || !r1.text && !r1.json)) {
+      r1 = await generateOnce(prompt, { maxTokens: MAX_TOKENS_FALLBACK, format: "text" })
     }
 
-    // --------- parse final ---------
-    let root: any = json
-    if (!root && text) {
-      const t = normalizeQuotes(removeTrailingCommas(stripCodeFences(text)))
+    const ai = r1.ai
+    let root = r1.json
+    if (!root && r1.text) {
+      const t = normalizeQuotes(removeTrailingCommas(stripCodeFences(r1.text)))
       root = tryParseLoose(t)
     }
+
     if (!root) {
-      throw new Error(`Erro ao processar resposta da IA (JSON inválido) — preview: ${slice(text || JSON.stringify(json) || "", 220)}`)
+      const diag = `status=${ai?.status || "?"}, reason=${ai?.incomplete_details?.reason || "?"}, output.len=${Array.isArray(ai?.output) ? ai.output.length : 0}`
+      throw new Error(`Erro ao processar resposta da IA (JSON inválido) — diag: ${diag}, preview: ${slice(r1.text || JSON.stringify(r1.json) || "", 260)}`)
     }
 
     const results = findCaptionsAnywhere(root)
     if (!results) {
-      throw new Error(`Erro ao processar resposta da IA (JSON inválido) — preview: ${slice(text || JSON.stringify(root) || "", 220)}`)
+      const diag = `status=${ai?.status || "?"}, reason=${ai?.incomplete_details?.reason || "?"}`
+      throw new Error(`Erro ao processar resposta da IA (JSON inválido) — ${diag}, preview: ${slice(r1.text || JSON.stringify(root) || "", 260)}`)
     }
 
     // uso/custo (estimativa simples)
@@ -292,7 +299,7 @@ export async function POST(request: Request) {
         credits_used: isAdmin ? 0 : 1,
         cost_usd: costEstimate,
         metadata: {
-          tone, platform, goal: sanitizedGoal, tokensUsed, model: MODEL(), numVariations,
+          tone, platform, goal, tokensUsed, model: MODEL(), numVariations: n,
           rateLimit: { remaining: rateLimit.remaining, resetAt: rateLimit.resetAt },
         },
       })

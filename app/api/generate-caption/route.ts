@@ -64,6 +64,17 @@ function coerceSingleToDoubleQuotes(s: string): string {
 function replaceArrows(s: string): string {
   return s.replace(/\u2192/g, ":")
 }
+function getTextValue(candidate: unknown): string | undefined {
+  if (!candidate) return undefined
+  if (typeof candidate === "string") return candidate
+  if (typeof candidate === "object") {
+    const obj = candidate as Record<string, unknown>
+    if (typeof obj.value === "string") return obj.value
+    if (typeof obj.text === "string") return obj.text
+    if (typeof obj.content === "string") return obj.content
+  }
+  return undefined
+}
 
 function isValidCaption(item: unknown): item is CaptionResult {
   if (!item || typeof item !== "object") return false
@@ -94,26 +105,68 @@ function tryParseLoose(raw: string): unknown | undefined {
 }
 
 function extractResponsePayload(resp: any): { text?: string; json?: unknown } {
-  if (typeof resp?.output_text === "string" && resp.output_text.trim()) {
-    return { text: resp.output_text.trim() }
+  const textParts: string[] = []
+  let firstJson: unknown
+
+  const pushText = (value?: string) => {
+    const trimmed = value?.trim()
+    if (trimmed) textParts.push(trimmed)
   }
 
-  let textConcat = ""
-  let firstJson: unknown
-  const outs = Array.isArray(resp?.output) ? resp.output : []
-
-  for (const o of outs) {
-    const content = Array.isArray(o?.content) ? o.content : []
-    for (const c of content) {
-      if (typeof c?.text === "string" && c.text.trim()) textConcat += c.text
-      if (!firstJson && c?.json && typeof c.json === "object") firstJson = c.json
-      if (!firstJson && c?.object && typeof c.object === "object") firstJson = c.object
-      if (typeof c?.output_text === "string" && c.output_text.trim()) textConcat += c.output_text
+  const considerJson = (candidate: unknown) => {
+    if (!firstJson && candidate && typeof candidate === "object") {
+      firstJson = candidate
     }
   }
 
-  if (!textConcat && !firstJson && outs.length > 0) firstJson = outs[0]
-  const text = textConcat.trim() || undefined
+  const processContentItem = (item: any) => {
+    if (!item) return
+    if (item.type === "reasoning_text") return
+
+    if (!firstJson) {
+      if (item?.json && typeof item.json === "object") considerJson(item.json)
+      if (item?.object && typeof item.object === "object") considerJson(item.object)
+      if (item?.type === "json" && typeof item?.value === "object") considerJson(item.value)
+    }
+
+    if (typeof item?.output_text === "string") pushText(item.output_text)
+    if (typeof item?.value === "string" && item.type === "text") pushText(item.value)
+
+    const extracted = getTextValue(item?.text ?? item?.data ?? item?.value)
+    pushText(extracted)
+  }
+
+  const processContainer = (container: any) => {
+    if (!container) return
+
+    const directText = getTextValue(container?.output_text ?? container?.text)
+    pushText(directText)
+
+    if (!firstJson) {
+      if (container?.json && typeof container.json === "object") considerJson(container.json)
+      if (container?.object && typeof container.object === "object") considerJson(container.object)
+    }
+
+    const content = Array.isArray(container?.content) ? container.content : []
+    for (const item of content) processContentItem(item)
+  }
+
+  processContainer(resp)
+  processContainer(resp?.response)
+
+  const outs = Array.isArray(resp?.output) ? resp.output : []
+  for (const o of outs) {
+    if (o?.type === "reasoning") continue
+    processContainer(o)
+  }
+
+  const nestedOuts = Array.isArray(resp?.response?.output) ? resp.response.output : []
+  for (const o of nestedOuts) {
+    if (o?.type === "reasoning") continue
+    processContainer(o)
+  }
+
+  const text = textParts.join("\n").trim() || undefined
   return { text, json: firstJson }
 }
 
@@ -199,7 +252,24 @@ async function generateOneVariation(desc: string, tone: string, platform: string
 
   // 4) Procura objetos com o shape correto em níveis diferentes.
   let item: unknown = root
-  if (root && typeof root === "object") {
+  if (Array.isArray(root)) {
+    for (const value of root) {
+      if (isValidCaption(value)) {
+        item = value
+        break
+      }
+      if (!item && value && typeof value === "object") {
+        const nestedObj = value as Record<string, unknown>
+        for (const candidate of Object.values(nestedObj)) {
+          if (isValidCaption(candidate)) {
+            item = candidate
+            break
+          }
+        }
+      }
+      if (isValidCaption(item)) break
+    }
+  } else if (root && typeof root === "object") {
     const rootObj = root as Record<string, unknown>
     if (Array.isArray((rootObj as any).results) && (rootObj as any).results.length > 0) {
       item = (rootObj as any).results[0]

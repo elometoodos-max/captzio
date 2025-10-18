@@ -29,24 +29,22 @@ interface CaptionResult {
 
 export async function POST(request: Request) {
   try {
-    console.log("[v0] Caption generation started")
+    console.log("[caption] generation started")
     const supabase = await createClient()
 
-    // Auth
+    // auth
     const {
       data: { user },
       error: authError,
     } = await supabase.auth.getUser()
     if (authError || !user) throw new AuthenticationError()
-    console.log("[v0] User authenticated:", user.id)
+    console.log("[caption] user:", user.id)
 
-    // Rate limit: 10/hora
+    // rate limit: 10/h
     const rateLimit = checkRateLimit(`caption:${user.id}`, 10, 3600000)
-    if (!rateLimit.allowed) {
-      throw new RateLimitError(rateLimit.resetAt)
-    }
+    if (!rateLimit.allowed) throw new RateLimitError(rateLimit.resetAt)
 
-    // User + créditos
+    // user + credits
     const { data: userData, error: userError } = await supabase
       .from("users")
       .select("*")
@@ -54,9 +52,10 @@ export async function POST(request: Request) {
       .single()
 
     if (userError || !userData) throw new NotFoundError("Usuário")
+
     const isAdmin = userData.role === "admin" || user.email === config.admin.email
 
-    // Body + validação
+    // body + validação
     const body: CaptionRequest = await request.json()
     const validation = validateCaptionRequest(body)
     if (!validation.valid) throw new ValidationError(validation.error!)
@@ -69,12 +68,12 @@ export async function POST(request: Request) {
       throw new InsufficientCreditsError(1, userData.credits)
     }
 
-    // Prompt
+    // prompt
     const prompt = `Você é um copywriter especializado em redes sociais. Gere ${numVariations} variantes de legenda em português para o negócio: ${sanitizedDescription}. Tom: ${tone}. Plataforma: ${platform}. Objetivo: ${sanitizedGoal}. Cada legenda com 1-3 emojis, 1 linha de CTA e 5 hashtags relevantes. Retorne apenas JSON array com objetos: {"caption":"...","cta":"...","hashtags":["...","..."]}. Não explique nada.`
 
-    console.log("[v0] Calling OpenAI API with model:", config.openai.models.caption)
+    console.log("[caption] calling OpenAI model:", config.openai.models.caption)
 
-    // Chamada OpenAI — FIX: usar max_completion_tokens
+    // Open GPT-5 Nano: sem temperature; usar max_completion_tokens
     const openaiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -82,19 +81,16 @@ export async function POST(request: Request) {
         Authorization: `Bearer ${config.openai.apiKey}`,
       },
       body: JSON.stringify({
-        model: config.openai.models.caption,
+        model: config.openai.models.caption, // ex.: "gpt-5-nano"
         messages: [
           {
             role: "system",
-            content: "Você é um especialista em copywriting para redes sociais. Sempre retorne respostas em JSON válido.",
+            content:
+              "Você é um especialista em copywriting para redes sociais. Sempre retorne respostas em JSON válido.",
           },
-          {
-            role: "user",
-            content: prompt,
-          },
+          { role: "user", content: prompt },
         ],
-        temperature: 0.8,               // remova se seu modelo específico não aceitar
-        max_completion_tokens: 1000,    // <-- substitui max_tokens
+        max_completion_tokens: 1000, // substitui max_tokens
       }),
     })
 
@@ -103,20 +99,18 @@ export async function POST(request: Request) {
       try {
         const errorData = await openaiResponse.json()
         errMsg = errorData?.error?.message || JSON.stringify(errorData)
-        console.error("[v0] OpenAI API error:", errorData)
+        console.error("[caption] openai error:", errorData)
       } catch {
-        console.error("[v0] OpenAI API error (non-JSON)")
+        console.error("[caption] openai error (non-JSON)")
       }
       throw new Error(`Erro ao gerar legendas com IA: ${errMsg}`)
     }
-
-    console.log("[v0] OpenAI API response received")
 
     const openaiData = await openaiResponse.json()
     const content: string | undefined = openaiData?.choices?.[0]?.message?.content
     if (!content) throw new Error("Resposta vazia da IA")
 
-    // Parsing robusto: aceita JSON puro ou cercado por ```json ... ```
+    // parsing robusto: aceita JSON puro ou cercado por ```json ... ```
     const extractJson = (txt: string): string => {
       const fenced =
         txt.match(/```json\s*([\s\S]*?)```/i) ||
@@ -128,20 +122,19 @@ export async function POST(request: Request) {
     try {
       const jsonString = extractJson(content)
       const parsed = JSON.parse(jsonString)
-      // Normaliza: se vier objeto único, vira array
       results = Array.isArray(parsed) ? parsed : [parsed]
     } catch (parseError) {
-      console.error("[v0] Failed to parse OpenAI response:", content)
+      console.error("[caption] parse failure; content:", content)
       throw new Error("Erro ao processar resposta da IA")
     }
 
-    // Tokens e custo (estimativa simples; ajuste conforme pricing do modelo)
+    // tokens e custo (estimativa simples)
     const tokensUsed =
       openaiData?.usage?.total_tokens ??
       (openaiData?.usage?.completion_tokens ?? 0) + (openaiData?.usage?.prompt_tokens ?? 0)
     const costEstimate = (tokensUsed / 1_000_000) * 0.45
 
-    // Débito de crédito (não-admin)
+    // debita crédito (se não for admin)
     if (!isAdmin) {
       const { error: updateError } = await supabase
         .from("users")
@@ -149,12 +142,12 @@ export async function POST(request: Request) {
         .eq("id", user.id)
 
       if (updateError) {
-        console.error("[v0] Failed to deduct credits:", updateError)
+        console.error("[caption] credit update error:", updateError)
         throw new Error("Erro ao processar créditos")
       }
     }
 
-    // Persistência mínima do primeiro resultado (se existir)
+    // salva primeiro resultado (se houver)
     try {
       const first = results[0] || { caption: "", hashtags: [], cta: "" }
       await supabase.from("posts").insert({
@@ -167,11 +160,11 @@ export async function POST(request: Request) {
         credits_used: isAdmin ? 0 : 1,
       })
     } catch (saveError) {
-      console.error("[v0] Failed to save caption:", saveError)
-      // não interrompe o fluxo de resposta ao cliente
+      console.error("[caption] save error:", saveError)
+      // não bloqueia a resposta
     }
 
-    // Log de uso
+    // log de uso
     await supabase.from("usage_logs").insert({
       user_id: user.id,
       action: "generate_caption",
@@ -201,7 +194,7 @@ export async function POST(request: Request) {
       },
     })
   } catch (error) {
-    console.error("[v0] Caption generation error:", error)
+    console.error("[caption] error:", error)
     const errorResponse = handleError(error)
     return NextResponse.json(
       { error: errorResponse.message, code: errorResponse.code },

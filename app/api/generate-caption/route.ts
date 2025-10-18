@@ -28,22 +28,38 @@ interface CaptionResult {
   hashtags: string[]
 }
 
-type OpenAIJson = Record<string, any>
-
 // ===== Constantes =====
 const MAX_VARIATIONS = 10
 const MIN_VARIATIONS = 1
 const RESPONSES_ENDPOINT = "https://api.openai.com/v1/responses"
-const MODEL = () => config.openai.models.caption // ex.: "gpt-5-nano"
+const MODEL = () => config.openai.models.caption // Exemplo: "gpt-5-nano"
 
-// ===== Utils =====
+// ===== Funções utilitárias =====
+function clamp(n: number, min: number, max: number) {
+  return Math.min(Math.max(n, min), max)
+}
+
+function toErrorMessage(e: unknown): string {
+  if (e instanceof Error) return e.message
+  try {
+    return JSON.stringify(e)
+  } catch {
+    return String(e)
+  }
+}
+
+function stripCodeFences(s: string): string {
+  const m =
+    s.match(/```json\s*([\s\S]*?)```/i) ||
+    s.match(/```\s*([\s\S]*?)```/i)
+  return m ? m[1].trim() : s.trim()
+}
+
 function extractResponseText(resp: any): string | undefined {
   const t1 = resp?.output_text
   if (typeof t1 === "string" && t1.trim()) return t1.trim()
-
   const t2 = resp?.output?.[0]?.content?.[0]?.text
   if (typeof t2 === "string" && t2.trim()) return t2.trim()
-
   if (Array.isArray(resp?.data)) {
     const parts: string[] = []
     for (const item of resp.data) {
@@ -54,13 +70,6 @@ function extractResponseText(resp: any): string | undefined {
     if (joined) return joined
   }
   return undefined
-}
-
-function stripCodeFences(s: string): string {
-  const m =
-    s.match(/```json\s*([\s\S]*?)```/i) ||
-    s.match(/```\s*([\s\S]*?)```/i)
-  return m ? m[1].trim() : s.trim()
 }
 
 function isValidCaptionArray(arr: any): arr is CaptionResult[] {
@@ -80,19 +89,6 @@ function isValidCaptionArray(arr: any): arr is CaptionResult[] {
   })
 }
 
-function clamp(n: number, min: number, max: number) {
-  return Math.min(Math.max(n, min), max)
-}
-
-function toErrorMessage(e: unknown): string {
-  if (e instanceof Error) return e.message
-  try {
-    return JSON.stringify(e)
-  } catch {
-    return String(e)
-  }
-}
-
 async function safeJson(res: Response) {
   try {
     return await res.json()
@@ -105,12 +101,12 @@ function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms))
 }
 
-// ===== OpenAI call com timeout + retries =====
-async function callOpenAIWithRetries(payload: OpenAIJson, opts?: { retries?: number; timeoutMs?: number }) {
+// ===== OpenAI com retry e timeout =====
+async function callOpenAIWithRetries(payload: any, opts?: { retries?: number; timeoutMs?: number }) {
   const retries = Math.max(0, opts?.retries ?? 2)
   const timeoutMs = Math.max(1_000, opts?.timeoutMs ?? 25_000)
-
   let lastErr: any = null
+
   for (let attempt = 0; attempt <= retries; attempt++) {
     const ac = new AbortController()
     const timer = setTimeout(() => ac.abort(), timeoutMs)
@@ -127,7 +123,6 @@ async function callOpenAIWithRetries(payload: OpenAIJson, opts?: { retries?: num
       clearTimeout(timer)
 
       if (res.ok) return res.json()
-
       if (res.status === 429 || (res.status >= 500 && res.status <= 599)) {
         lastErr = await safeJson(res)
         const backoff = 500 * Math.pow(2, attempt)
@@ -151,37 +146,37 @@ async function callOpenAIWithRetries(payload: OpenAIJson, opts?: { retries?: num
   throw new Error(toErrorMessage(lastErr) || "Falha ao chamar OpenAI após retries")
 }
 
-// ===== Handler =====
+// ===== Handler principal =====
 export async function POST(request: Request) {
   try {
     const supabase = await createClient()
 
-    // Autenticação
+    // autenticação
     const {
       data: { user },
       error: authError,
     } = await supabase.auth.getUser()
     if (authError || !user) throw new AuthenticationError()
 
-    // Rate limit (10/hora)
+    // rate limit (10/hora)
     const rateLimit = checkRateLimit(`caption:${user.id}`, 10, 3600000)
     if (!rateLimit.allowed) throw new RateLimitError(rateLimit.resetAt)
 
-    // Usuário + créditos
+    // usuário + créditos
     const { data: userData, error: userError } = await supabase
       .from("users")
       .select("*")
       .eq("id", user.id)
       .single()
     if (userError || !userData) throw new NotFoundError("Usuário")
+
     const isAdmin = userData.role === "admin" || user.email === config.admin.email
 
-    // Body + validação primária
+    // body + validação
     const body: CaptionRequest = await request.json()
     const validation = validateCaptionRequest(body)
     if (!validation.valid) throw new ValidationError(validation.error!)
 
-    // Sanitização + clamp de variações
     const tone = String(body.tone || "").trim()
     const platform = String(body.platform || "").trim()
     const businessDescription = String(body.businessDescription || "").trim()
@@ -191,11 +186,10 @@ export async function POST(request: Request) {
     const sanitizedDescription = sanitizeInput(businessDescription)
     const sanitizedGoal = sanitizeInput(goal)
 
-    if (!isAdmin && (userData.credits ?? 0) < 1) {
+    if (!isAdmin && (userData.credits ?? 0) < 1)
       throw new InsufficientCreditsError(1, userData.credits ?? 0)
-    }
 
-    // Prompt (clean)
+    // prompt
     const userPrompt =
       `Você é um copywriter brasileiro especializado em redes sociais.\n` +
       `Gere ${numVariations} variantes de legenda em português para o negócio: ${sanitizedDescription}.\n` +
@@ -203,51 +197,45 @@ export async function POST(request: Request) {
       `Plataforma: ${platform || "Instagram"}.\n` +
       `Objetivo: ${sanitizedGoal || "engajamento e conversão"}.\n` +
       `Cada legenda deve ter: 1–3 emojis, 1 linha de CTA e 5 hashtags relevantes.\n` +
-      `Responda APENAS um JSON com a propriedade "results" contendo um array de objetos no formato { "caption": string, "cta": string, "hashtags": string[] }.`
+      `Responda APENAS um JSON com a propriedade "results" contendo um array de objetos { "caption": string, "cta": string, "hashtags": string[] }.`
 
-    // Payload da Responses API — sem schema/response_format
-    const payload: OpenAIJson = {
-      model: MODEL(),                              // ex.: "gpt-5-nano"
+    // payload simples (sem schema/response_format → compatível com GPT-5 Nano)
+    const payload = {
+      model: MODEL(),
       instructions: "Responda exclusivamente com JSON válido.",
       input: [{ role: "user", content: userPrompt }],
       max_output_tokens: 1000,
-      // Força saída como JSON, sem schema (evita o erro que você recebeu)
       text: { format: "json" },
     }
 
-    // Chamada com retry/timeout
     const ai = await callOpenAIWithRetries(payload, { retries: 2, timeoutMs: 25_000 })
 
-    // Extrai texto
+    // extrai texto
     const raw = extractResponseText(ai)
-    if (!raw) {
-      console.error("[caption] empty model output", ai)
-      throw new Error("Resposta vazia da IA")
-    }
+    if (!raw) throw new Error("Resposta vazia da IA")
 
-    // Parse + validação de estrutura
+    // parse + valida shape
     let results: CaptionResult[]
     try {
       const text = stripCodeFences(raw)
       const parsed = JSON.parse(text) as { results?: unknown }
       const arr = (parsed && (parsed as any).results) ?? null
-      if (!isValidCaptionArray(arr)) {
+      if (!isValidCaptionArray(arr))
         throw new Error("JSON não corresponde ao formato esperado (object.results[])")
-      }
       results = arr as CaptionResult[]
     } catch (e) {
-      console.error("[caption] JSON parse/shape error", { raw, error: toErrorMessage(e) })
+      console.error("[caption] JSON parse error", { raw, error: toErrorMessage(e) })
       throw new Error("Erro ao processar resposta da IA (JSON inválido)")
     }
 
-    // Uso/custo (estimativa; ajuste conforme pricing real do modelo)
+    // uso/custo (estimativa)
     const usage = ai?.usage ?? {}
     const tokensUsed =
       usage?.total_tokens ??
       ((usage?.output_tokens ?? 0) + (usage?.input_tokens ?? 0))
     const costEstimate = (tokensUsed / 1_000_000) * 0.45
 
-    // Debita 1 crédito (não-admin)
+    // debita 1 crédito (não-admin)
     let creditsRemaining = userData.credits
     if (!isAdmin) {
       const newCredits = Math.max(0, (userData.credits ?? 0) - 1)
@@ -255,14 +243,11 @@ export async function POST(request: Request) {
         .from("users")
         .update({ credits: newCredits })
         .eq("id", user.id)
-      if (updateError) {
-        console.error("[caption] credit update error:", updateError)
-        throw new Error("Erro ao processar créditos")
-      }
+      if (updateError) throw new Error("Erro ao processar créditos")
       creditsRemaining = newCredits
     }
 
-    // Persiste o primeiro resultado
+    // salva primeiro resultado (opcional)
     try {
       const first = results[0]
       if (first) {
@@ -280,7 +265,7 @@ export async function POST(request: Request) {
       console.error("[caption] save error:", saveError)
     }
 
-    // Log de uso
+    // loga uso
     try {
       await supabase.from("usage_logs").insert({
         user_id: user.id,
@@ -304,7 +289,7 @@ export async function POST(request: Request) {
       console.error("[caption] usage log error:", logErr)
     }
 
-    // Resposta final
+    // resposta final
     return NextResponse.json({
       results,
       creditsRemaining: isAdmin ? "∞" : creditsRemaining,

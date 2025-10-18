@@ -31,139 +31,138 @@ const MIN_VARIATIONS = 1
 const RESPONSES_ENDPOINT = "https://api.openai.com/v1/responses"
 const MODEL = () => config.openai.models.caption // ex.: "gpt-5-nano"
 
-// ---------- helpers básicos ----------
+// ----------------- utils básicas -----------------
 const clamp = (n: number, min: number, max: number) => Math.min(Math.max(n, min), max)
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
-const toErrorMessage = (e: unknown) => (e instanceof Error ? e.message : (()=>{try{return JSON.stringify(e)}catch{return String(e)}})())
+const slice = (s: string, n = 350) => (s.length > n ? s.slice(0, n) + "..." : s)
 
-const stripCodeFences = (s: string) => {
+function stripCodeFences(s: string): string {
   const m = s.match(/```json\s*([\s\S]*?)```/i) || s.match(/```\s*([\s\S]*?)```/i)
   return (m ? m[1] : s).trim()
 }
-
-// ---------- validações ----------
-function isValidCaption(item: any): item is CaptionResult {
-  return (
-    item &&
-    typeof item.caption === "string" &&
-    item.caption.trim() &&
-    typeof item.cta === "string" &&
-    item.cta.trim() &&
-    Array.isArray(item.hashtags) &&
-    item.hashtags.length >= 3 &&
-    item.hashtags.length <= 10 &&
-    item.hashtags.every((h) => typeof h === "string" && h.trim())
-  )
-}
-function isValidCaptionArray(arr: any): arr is CaptionResult[] {
-  return Array.isArray(arr) && arr.length > 0 && arr.every(isValidCaption)
-}
-
-// ---------- extração/varredura do payload ----------
-function extractResponsePayload(resp: any): { text?: string; json?: any } {
-  const texts: string[] = []
-  let json: any = undefined
-
-  const visit = (node: any) => {
-    if (!node) return
-    if (typeof node === "string") {
-      const t = node.trim()
-      if (t) texts.push(t)
-      return
-    }
-    if (Array.isArray(node)) {
-      for (const v of node) visit(v)
-      return
-    }
-    if (typeof node === "object") {
-      if (typeof (node as any).text === "string" && (node as any).text.trim()) texts.push((node as any).text.trim())
-      if (!json && (node as any).json && typeof (node as any).json === "object") json = (node as any).json
-      if (!json && (node as any).object && typeof (node as any).object === "object") json = (node as any).object
-      if (!json && (node as any).data && typeof (node as any).data === "object") json = (node as any).data
-      if (!json && (node as any).result && typeof (node as any).result === "object") json = (node as any).result
-      if (typeof (node as any).output_text === "string" && (node as any).output_text.trim()) texts.push((node as any).output_text.trim())
-      for (const k of Object.keys(node)) visit((node as any)[k])
-    }
-  }
-  visit(resp)
-
-  const text = texts.join("").trim() || undefined
-  return { text, json }
-}
-
-// ---------- reparo de JSON ruim vindo como texto ----------
 function normalizeQuotes(s: string): string {
-  return s
-    .replace(/[\u201C\u201D\u2033]/g, '"') // aspas duplas “ ”
-    .replace(/[\u2018\u2019\u2032]/g, "'") // aspas simples ‘ ’
+  return s.replace(/[\u201C\u201D\u2033]/g, '"').replace(/[\u2018\u2019\u2032]/g, "'")
 }
 function removeTrailingCommas(s: string): string {
   return s.replace(/,\s*([}\]])/g, "$1")
 }
 function coerceSingleToDoubleQuotes(s: string): string {
-  // cuidado: isso é heurístico; cobre a maioria dos casos simples
-  // chaves: 'key': -> "key":
-  s = s.replace(/'(\w+?)'\s*:/g, '"$1":')
-  // strings: : 'value' -> : "value"
-  s = s.replace(/:\s*'([^']*)'/g, ': "$1"')
+  s = s.replace(/'(\w+?)'\s*:/g, '"$1":')     // 'key': -> "key":
+  s = s.replace(/:\s*'([^']*)'/g, ': "$1"')   // : 'val' -> : "val"
   return s
 }
-function sliceToJsonish(s: string): string {
-  const start = Math.min(...['{','['].map(ch => {const i=s.indexOf(ch); return i<0?1e9:i}))
-  const endBrace = s.lastIndexOf('}')
-  const endBracket = s.lastIndexOf(']')
-  const end = Math.max(endBrace, endBracket)
-  if (start === 1e9 || end < start) return s
-  return s.slice(start, end + 1)
+
+// Encontra o MAIOR bloco JSON plausível em uma string (usa pilha)
+function findLargestJsonBlock(text: string): string | undefined {
+  const idxs: Array<{start: number; end: number}> = []
+  const openers = ['{', '[']
+  const closers: Record<string, string> = { '{': '}', '[': ']' }
+
+  for (let pass = 0; pass < 2; pass++) {
+    const opener = openers[pass]
+    const closer = closers[opener]
+    let stack: number[] = []
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i]
+      if (ch === opener) stack.push(i)
+      else if (ch === closer && stack.length) {
+        const start = stack.pop()!
+        if (stack.length === 0) idxs.push({ start, end: i + 1 })
+      }
+    }
+  }
+  if (!idxs.length) return undefined
+  // pega o maior intervalo
+  idxs.sort((a,b) => (b.end - b.start) - (a.end - a.start))
+  const best = idxs[0]
+  return text.slice(best.start, best.end)
 }
-function tryParseMany(raw: string): any {
+
+function tryParseLoose(raw: string): any | undefined {
   let t = stripCodeFences(raw)
   t = normalizeQuotes(t)
-  t = sliceToJsonish(t)
-  // 1) tentativa direta
+  // 1) direto
   try { return JSON.parse(t) } catch {}
   // 2) remove vírgulas finais
   try { return JSON.parse(removeTrailingCommas(t)) } catch {}
-  // 3) converte aspas simples simples
+  // 3) converte aspas simples
   try { return JSON.parse(coerceSingleToDoubleQuotes(removeTrailingCommas(t))) } catch {}
-  // 4) fallback extremo (eval style) — aceita JSON5-like
-  try {
-    // eslint-disable-next-line no-new-func
-    const val = Function(`"use strict"; return (${coerceSingleToDoubleQuotes(removeTrailingCommas(t))});`)()
-    if (val && (typeof val === "object")) return val
-  } catch {}
+  // 4) detecta maior bloco JSON e tenta de novo
+  const block = findLargestJsonBlock(t)
+  if (block) {
+    try { return JSON.parse(block) } catch {}
+    try { return JSON.parse(removeTrailingCommas(block)) } catch {}
+    try { return JSON.parse(coerceSingleToDoubleQuotes(removeTrailingCommas(block))) } catch {}
+  }
   return undefined
 }
 
-// ---------- acha o array de legendas em qualquer estrutura ----------
+function isValidCaption(item: any): item is CaptionResult {
+  return (
+    item &&
+    typeof item.caption === "string" && item.caption.trim() &&
+    typeof item.cta === "string" && item.cta.trim() &&
+    Array.isArray(item.hashtags) &&
+    item.hashtags.length >= 3 && item.hashtags.length <= 10 &&
+    item.hashtags.every((h: any) => typeof h === "string" && h.trim())
+  )
+}
+function isValidCaptionArray(arr: any): arr is CaptionResult[] {
+  return Array.isArray(arr) && arr.length > 0 && arr.every(isValidCaption)
+}
 function findCaptionsAnywhere(root: any): CaptionResult[] | undefined {
+  if (!root) return
   if (isValidCaptionArray(root)) return root
-  if (root && typeof root === "object") {
-    if (isValidCaptionArray(root.results)) return root.results
-    if (isValidCaptionArray(root.items)) return root.items
-    if (isValidCaption(root)) return [root]
-    for (const k of Object.keys(root)) {
-      const found = findCaptionsAnywhere((root as any)[k])
-      if (found) return found
-    }
-  }
+  if (isValidCaptionArray((root as any).results)) return (root as any).results
+  if (isValidCaptionArray((root as any).items)) return (root as any).items
+  if (isValidCaption(root)) return [root]
   if (Array.isArray(root)) {
     for (const v of root) {
-      const found = findCaptionsAnywhere(v)
-      if (found) return found
+      const f = findCaptionsAnywhere(v)
+      if (f) return f
+    }
+  } else if (typeof root === "object") {
+    for (const k of Object.keys(root)) {
+      const f = findCaptionsAnywhere((root as any)[k])
+      if (f) return f
     }
   }
-  return undefined
+  return
 }
 
-// ---------- chamada OpenAI ----------
+// ----------------- extração do Responses API -----------------
+function extractResponsePayload(resp: any): { text?: string; json?: any } {
+  // 1) output_text direto
+  if (typeof resp?.output_text === "string" && resp.output_text.trim()) {
+    return { text: resp.output_text.trim() }
+  }
+  // 2) varre output[].content[]
+  let textConcat = ""
+  let firstJson: any
+  const outs = Array.isArray(resp?.output) ? resp.output : []
+  for (const o of outs) {
+    const content = Array.isArray(o?.content) ? o.content : []
+    for (const c of content) {
+      if (typeof c?.text === "string" && c.text.trim()) textConcat += c.text
+      if (!firstJson && c?.json && typeof c.json === "object") firstJson = c.json
+      if (!firstJson && c?.object && typeof c.object === "object") firstJson = c.object
+      if (typeof c?.output_text === "string" && c.output_text.trim()) textConcat += c.output_text
+    }
+  }
+  const text = textConcat.trim() || undefined
+  return { text, json: firstJson }
+}
+
+// ----------------- OpenAI (Responses API) -----------------
 async function callOpenAI(payload: any, timeoutMs = 25000) {
   const ac = new AbortController()
   const timer = setTimeout(() => ac.abort(), timeoutMs)
   try {
     const res = await fetch(RESPONSES_ENDPOINT, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${config.openai.apiKey}` },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${config.openai.apiKey}`,
+      },
       body: JSON.stringify(payload),
       signal: ac.signal,
     })
@@ -177,7 +176,6 @@ async function callOpenAI(payload: any, timeoutMs = 25000) {
   }
 }
 
-// ---------- payloads ----------
 const payloadJsonObj = (prompt: string) => ({
   model: MODEL(),
   instructions: "Responda exclusivamente com JSON válido.",
@@ -193,7 +191,7 @@ const payloadText = (prompt: string) => ({
   text: { format: { type: "text" } },
 })
 
-// ---------- handler ----------
+// ----------------- handler -----------------
 export async function POST(request: Request) {
   try {
     const supabase = await createClient()
@@ -207,7 +205,8 @@ export async function POST(request: Request) {
     if (!rateLimit.allowed) throw new RateLimitError(rateLimit.resetAt)
 
     // usuário
-    const { data: userData, error: userError } = await supabase.from("users").select("*").eq("id", user.id).single()
+    const { data: userData, error: userError } = await supabase
+      .from("users").select("*").eq("id", user.id).single()
     if (userError || !userData) throw new NotFoundError("Usuário")
     const isAdmin = userData.role === "admin" || user.email === config.admin.email
 
@@ -250,16 +249,22 @@ export async function POST(request: Request) {
       throw new Error(`Resposta vazia da IA (diag: ${diag})`)
     }
 
-    // parse robusto
-    const root = json ?? tryParseMany(text!)
-    const results = findCaptionsAnywhere(root)
-    if (!results) {
-      const preview = typeof text === "string" ? text.slice(0, 200) : JSON.stringify(root)?.slice(0, 200)
-      console.error("[caption] parse/shape fail", { preview })
-      throw new Error("Erro ao processar resposta da IA (JSON inválido)")
+    // --------- parse robusto ---------
+    let root: any = json
+    if (!root) {
+      const txt = normalizeQuotes(removeTrailingCommas(stripCodeFences(text!)))
+      root = tryParseLoose(txt)
+    }
+    if (!root) {
+      throw new Error(`Erro ao processar resposta da IA (JSON inválido) — preview: ${slice(text || JSON.stringify(json) || "", 220)}`)
     }
 
-    // usage / custo
+    const results = findCaptionsAnywhere(root)
+    if (!results) {
+      throw new Error(`Erro ao processar resposta da IA (JSON inválido) — preview: ${slice(text || JSON.stringify(root) || "", 220)}`)
+    }
+
+    // uso/custo (estimativa simples)
     const usage = ai?.usage ?? {}
     const tokensUsed = usage?.total_tokens ?? ((usage?.output_tokens ?? 0) + (usage?.input_tokens ?? 0))
     const costEstimate = (tokensUsed / 1_000_000) * 0.45
@@ -273,7 +278,7 @@ export async function POST(request: Request) {
       creditsRemaining = newCredits
     }
 
-    // persistência (primeiro item)
+    // persiste primeiro
     try {
       const first = results[0]
       if (first) {
@@ -289,7 +294,7 @@ export async function POST(request: Request) {
       }
     } catch {}
 
-    // log de uso
+    // log
     try {
       await supabase.from("usage_logs").insert({
         user_id: user.id,

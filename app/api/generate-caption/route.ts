@@ -28,23 +28,18 @@ interface CaptionResult {
 
 // ===== Constantes =====
 const RESPONSES_ENDPOINT = "https://api.openai.com/v1/responses"
-const MODEL = () => config.openai.models.caption
+const MODEL = () => config.openai.models.caption // ex.: "gpt-5-nano"
 const MAX_VARIATIONS = 10
 const MIN_VARIATIONS = 1
 
-const MAX_OUTPUT_TOKENS_JSON = 420
-const MAX_OUTPUT_TOKENS_TEXT = 360
+// Para Nano: saída curtíssima por variação
+const MAX_OUTPUT_TOKENS_SCHEMA = 200  // schema costuma ser mais enxuto
+const MAX_OUTPUT_TOKENS_TEXT   = 220  // fallback em texto simples
 
 // ===== Utils =====
 const clamp = (n: number, min: number, max: number) => Math.min(Math.max(n, min), max)
-const slice = (s: string, n = 280) => (s && s.length > n ? `${s.slice(0, n)}...` : s || "")
-const toErr = (e: unknown) => (e instanceof Error ? e.message : (() => {
-  try {
-    return JSON.stringify(e)
-  } catch {
-    return String(e)
-  }
-})())
+const slice = (s: string, n = 240) => (s && s.length > n ? s.slice(0, n) + "..." : s || "")
+const toErr = (e: unknown) => (e instanceof Error ? e.message : (() => { try { return JSON.stringify(e) } catch { return String(e) } })())
 
 function stripCodeFences(s: string): string {
   const m = s.match(/```json\s*([\s\S]*?)```/i) || s.match(/```\s*([\s\S]*?)```/i)
@@ -57,268 +52,196 @@ function removeTrailingCommas(s: string): string {
   return s.replace(/,\s*([}\]])/g, "$1")
 }
 function coerceSingleToDoubleQuotes(s: string): string {
-  let t = s.replace(/'(\w+?)'\s*:/g, '"$1":')
-  t = t.replace(/:\s*'([^']*)'/g, ': "$1"')
-  return t
-}
-function replaceArrows(s: string): string {
-  return s.replace(/\u2192/g, ":")
-}
-function getTextValue(candidate: unknown): string | undefined {
-  if (!candidate) return undefined
-  if (typeof candidate === "string") return candidate
-  if (typeof candidate === "object") {
-    const obj = candidate as Record<string, unknown>
-    if (typeof obj.value === "string") return obj.value
-    if (typeof obj.text === "string") return obj.text
-    if (typeof obj.content === "string") return obj.content
-  }
-  return undefined
+  s = s.replace(/'(\w+?)'\s*:/g, '"$1":')
+  s = s.replace(/:\s*'([^']*)'/g, ': "$1"')
+  return s
 }
 
-function isValidCaption(item: unknown): item is CaptionResult {
-  if (!item || typeof item !== "object") return false
-  const candidate = item as CaptionResult
+function isValidCaption(item: any): item is CaptionResult {
   return (
-    typeof candidate.caption === "string" && candidate.caption.trim().length > 0 &&
-    typeof candidate.cta === "string" && candidate.cta.trim().length > 0 &&
-    Array.isArray(candidate.hashtags) &&
-    candidate.hashtags.length === 5 &&
-    candidate.hashtags.every((h) => typeof h === "string" && h.trim().length > 0)
+    item &&
+    typeof item.caption === "string" && item.caption.trim() &&
+    typeof item.cta === "string" && item.cta.trim() &&
+    Array.isArray(item.hashtags) &&
+    item.hashtags.length >= 3 && item.hashtags.length <= 5 &&
+    item.hashtags.every((h: any) => typeof h === "string" && h.trim())
   )
 }
 
-function tryParseLoose(raw: string): unknown | undefined {
+function tryParseLoose(raw: string): any | undefined {
   let t = stripCodeFences(raw)
   t = normalizeQuotes(t)
-  t = replaceArrows(t)
-  try {
-    return JSON.parse(t)
-  } catch {}
-  try {
-    return JSON.parse(removeTrailingCommas(t))
-  } catch {}
-  try {
-    return JSON.parse(coerceSingleToDoubleQuotes(removeTrailingCommas(t)))
-  } catch {}
+  try { return JSON.parse(t) } catch {}
+  try { return JSON.parse(removeTrailingCommas(t)) } catch {}
+  try { return JSON.parse(coerceSingleToDoubleQuotes(removeTrailingCommas(t))) } catch {}
   return undefined
 }
 
-function extractResponsePayload(resp: any): { text?: string; json?: unknown } {
-  const textParts: string[] = []
-  let firstJson: unknown
-
-  const pushText = (value?: string) => {
-    const trimmed = value?.trim()
-    if (trimmed) textParts.push(trimmed)
+// Extrai texto/JSON de formatos comuns do Responses API
+function extractResponsePayload(resp: any): { text?: string; json?: any } {
+  if (typeof resp?.output_text === "string" && resp.output_text.trim()) {
+    return { text: resp.output_text.trim() }
   }
-
-  const considerJson = (candidate: unknown) => {
-    if (!firstJson && candidate && typeof candidate === "object") {
-      firstJson = candidate
-    }
-  }
-
-  const processContentItem = (item: any) => {
-    if (!item) return
-    if (item.type === "reasoning_text") return
-
-    if (!firstJson) {
-      if (item?.json && typeof item.json === "object") considerJson(item.json)
-      if (item?.object && typeof item.object === "object") considerJson(item.object)
-      if (item?.type === "json" && typeof item?.value === "object") considerJson(item.value)
-    }
-
-    if (typeof item?.output_text === "string") pushText(item.output_text)
-    if (typeof item?.value === "string" && item.type === "text") pushText(item.value)
-
-    const extracted = getTextValue(item?.text ?? item?.data ?? item?.value)
-    pushText(extracted)
-  }
-
-  const processContainer = (container: any) => {
-    if (!container) return
-
-    const directText = getTextValue(container?.output_text ?? container?.text)
-    pushText(directText)
-
-    if (!firstJson) {
-      if (container?.json && typeof container.json === "object") considerJson(container.json)
-      if (container?.object && typeof container.object === "object") considerJson(container.object)
-    }
-
-    const content = Array.isArray(container?.content) ? container.content : []
-    for (const item of content) processContentItem(item)
-  }
-
-  processContainer(resp)
-  processContainer(resp?.response)
-
+  let textConcat = ""
+  let firstJson: any
   const outs = Array.isArray(resp?.output) ? resp.output : []
   for (const o of outs) {
-    if (o?.type === "reasoning") continue
-    processContainer(o)
+    const content = Array.isArray(o?.content) ? o.content : []
+    for (const c of content) {
+      if (typeof c?.text === "string" && c.text.trim()) textConcat += c.text
+      if (!firstJson && c?.json && typeof c.json === "object") firstJson = c.json
+      if (!firstJson && c?.object && typeof c.object === "object") firstJson = c.object
+      if (typeof c?.output_text === "string" && c.output_text.trim()) textConcat += c.output_text
+    }
   }
-
-  const nestedOuts = Array.isArray(resp?.response?.output) ? resp.response.output : []
-  for (const o of nestedOuts) {
-    if (o?.type === "reasoning") continue
-    processContainer(o)
-  }
-
-  const text = textParts.join("\n").trim() || undefined
+  if (!textConcat && !firstJson && outs.length > 0) firstJson = outs[0]
+  const text = textConcat.trim() || undefined
   return { text, json: firstJson }
 }
 
-async function callOpenAI(payload: unknown, timeoutMs = 20000) {
+async function callOpenAI(payload: any, timeoutMs = 18000) {
   const ac = new AbortController()
   const timer = setTimeout(() => ac.abort(), timeoutMs)
   try {
     const res = await fetch(RESPONSES_ENDPOINT, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${config.openai.apiKey}`,
-      },
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${config.openai.apiKey}` },
       body: JSON.stringify(payload),
       signal: ac.signal,
     })
-
     const body = await res.json().catch(() => ({}))
-    if (!res.ok) {
-      const err = (body as any)?.error?.message || `OpenAI HTTP ${res.status}`
-      throw new Error(err)
-    }
+    if (!res.ok) throw new Error((body as any)?.error?.message || `OpenAI HTTP ${res.status}`)
     return body
   } finally {
     clearTimeout(timer)
   }
 }
 
-function makePromptOne(desc: string, tone: string, platform: string, goal: string) {
+// ===== Prompts e payloads (1 variação por chamada) =====
+function promptOne(desc: string, tone: string, platform: string, goal: string) {
+  // ultra curto para não estourar tokens
   return (
-    `Gere 1 legenda PT-BR.\n` +
-    `Negócio: ${desc}\n` +
-    `Tom: ${tone || "neutro/profissional"} | Plataforma: ${platform || "Instagram"} | Objetivo: ${goal || "engajamento"}\n` +
-    `Formato JSON EXATO: {"caption":"(≤150 chars)","cta":"(1 linha)","hashtags":["#tag1","#tag2","#tag3","#tag4","#tag5"]}\n` +
-    `Não inclua markdown. Apenas JSON.`
+    `1 legenda PT-BR. Negócio: ${desc}. Tom: ${tone || "neutro"}. Plataforma: ${platform || "Instagram"}. Objetivo: ${goal || "engajamento"}.\n` +
+    `Sem explicações. Apenas o JSON final.`
   )
 }
 
-const payloadJsonObj = (prompt: string) => ({
+// JSON Schema mínimo (saída beeem curta)
+const captionJsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["caption", "cta", "hashtags"],
+  properties: {
+    caption: { type: "string", maxLength: 100 }, // <= 100 chars
+    cta: { type: "string", maxLength: 80 },      // 1 linha curta
+    hashtags: {
+      type: "array",
+      minItems: 3,
+      maxItems: 3, // 3 para reduzir tokens
+      items: { type: "string", maxLength: 20 }
+    }
+  }
+} as const
+
+const payloadSchema = (prompt: string) => ({
   model: MODEL(),
-  instructions: "Retorne exclusivamente um JSON válido e completo.",
+  instructions: "Devolva somente JSON válido que satisfaça o schema. Não explique. Não use markdown.",
   input: [{ role: "user", content: [{ type: "input_text", text: prompt }] }],
-  max_output_tokens: MAX_OUTPUT_TOKENS_JSON,
-  // Configuração oficial da Responses API para JSON estruturado.
-  text: { format: { type: "json_object" as const } },
+  max_output_tokens: MAX_OUTPUT_TOKENS_SCHEMA,
+  text: {
+    format: {
+      type: "json_schema",
+      name: "Caption",
+      schema: captionJsonSchema
+    }
+  }
 })
 
 const payloadText = (prompt: string) => ({
   model: MODEL(),
-  instructions: "Retorne exclusivamente um JSON válido e completo (sem markdown).",
+  instructions: `Retorne apenas: {"caption":"","cta":"","hashtags":["#a","#b","#c"]} (JSON válido).`,
   input: [{ role: "user", content: [{ type: "input_text", text: prompt }] }],
   max_output_tokens: MAX_OUTPUT_TOKENS_TEXT,
-  // Fallback quando o modo json_object sinaliza truncamento.
   text: { format: { type: "text" as const } },
 })
 
+// Gera UMA variação com 2 tentativas (schema -> text)
 async function generateOneVariation(desc: string, tone: string, platform: string, goal: string): Promise<CaptionResult> {
-  const prompt = makePromptOne(desc, tone, platform, goal)
+  const prompt = promptOne(desc, tone, platform, goal)
 
-  // 1) Tenta primeiro com text.format:"json_object" para evitar parse manual.
-  let ai = await callOpenAI(payloadJsonObj(prompt))
+  // 1) Schema (curto e estrito)
+  let ai = await callOpenAI(payloadSchema(prompt))
   let status: string | undefined = ai?.status
   let reason: string | undefined = ai?.incomplete_details?.reason
   let { text, json } = extractResponsePayload(ai)
 
-  // 2) Se a API marcar truncamento/saída vazia, refaz no modo plain text.
+  // 2) Se incompleto/truncado, força TEXT minimalista
   if (status !== "completed" && (reason === "max_output_tokens" || (!text && !json))) {
     ai = await callOpenAI(payloadText(prompt))
     status = ai?.status
     reason = ai?.incomplete_details?.reason
-    const extracted = extractResponsePayload(ai)
-    text = extracted.text
-    json = extracted.json
+    const p = extractResponsePayload(ai)
+    text = p.text
+    json = p.json
   }
 
-  // 3) Decodifica qualquer estrutura devolvida pela Responses API.
-  let root: unknown = json
+  // 3) Decodifica resultado
+  let root: any = json
   if (!root && text) root = tryParseLoose(text)
   if (!root) {
     const diag = `status=${status || "?"}, reason=${reason || "?"}`
-    throw new Error(`Falha ao decodificar variação (JSON inválido) — ${diag}, preview: ${slice(text || JSON.stringify(json) || "", 220)}`)
+    throw new Error(`Falha ao decodificar variação (JSON inválido) — ${diag}, preview: ${slice(text || JSON.stringify(json) || "", 200)}`)
   }
 
-  // 4) Procura objetos com o shape correto em níveis diferentes.
-  let item: unknown = root
-  if (Array.isArray(root)) {
-    for (const value of root) {
-      if (isValidCaption(value)) {
-        item = value
-        break
-      }
-      if (!item && value && typeof value === "object") {
-        const nestedObj = value as Record<string, unknown>
-        for (const candidate of Object.values(nestedObj)) {
-          if (isValidCaption(candidate)) {
-            item = candidate
-            break
-          }
-        }
-      }
-      if (isValidCaption(item)) break
-    }
-  } else if (root && typeof root === "object") {
-    const rootObj = root as Record<string, unknown>
-    if (Array.isArray((rootObj as any).results) && (rootObj as any).results.length > 0) {
-      item = (rootObj as any).results[0]
-    } else if (Array.isArray((rootObj as any).items) && (rootObj as any).items.length > 0) {
-      item = (rootObj as any).items[0]
-    }
-    if (!isValidCaption(item)) {
-      for (const value of Object.values(rootObj)) {
-        if (isValidCaption(value)) {
-          item = value
-          break
-        }
+  // 4) Normaliza objeto final
+  let item: any = root
+  if (item && typeof item === "object") {
+    if (Array.isArray(item.results) && item.results.length) item = item.results[0]
+    else if (Array.isArray(item.items) && item.items.length) item = item.items[0]
+  }
+  if (!isValidCaption(item)) {
+    // tentativa superficial em campos internos
+    if (root && typeof root === "object") {
+      for (const v of Object.values(root)) {
+        if (isValidCaption(v)) { item = v; break }
       }
     }
   }
-
   if (!isValidCaption(item)) {
     const preview = typeof root === "string" ? root : JSON.stringify(root)
-    throw new Error(`Modelo não retornou campos válidos — preview: ${slice(preview, 220)}`)
+    throw new Error(`Modelo não retornou campos válidos — preview: ${slice(preview, 200)}`)
   }
 
-  const normalizedHashtags = item.hashtags.map((h) => (h.startsWith("#") ? h : `#${h.replace(/\s+/g, "")}`))
+  // força "#"
+  const hashtags = item.hashtags.map((h: string) => (h.startsWith("#") ? h : `#${h.replace(/\s+/g, "")}`))
 
   return {
     caption: String(item.caption).trim(),
     cta: String(item.cta).trim(),
-    hashtags: normalizedHashtags,
+    hashtags,
   }
 }
 
+// ===== Handler principal =====
 export async function POST(request: Request) {
   try {
     const supabase = await createClient()
 
+    // auth
     const { data: { user }, error: authError } = await supabase.auth.getUser()
     if (authError || !user) throw new AuthenticationError()
 
+    // rate limit
     const rateLimit = checkRateLimit(`caption:${user.id}`, 10, 3_600_000)
     if (!rateLimit.allowed) throw new RateLimitError(rateLimit.resetAt)
 
+    // usuário
     const { data: userData, error: userError } = await supabase
-      .from("users")
-      .select("*")
-      .eq("id", user.id)
-      .single()
+      .from("users").select("*").eq("id", user.id).single()
     if (userError || !userData) throw new NotFoundError("Usuário")
-
     const isAdmin = userData.role === "admin" || user.email === config.admin.email
 
+    // body
     const body = (await request.json()) as CaptionRequest
     const validation = validateCaptionRequest(body)
     if (!validation.valid) throw new ValidationError(validation.error ?? "Requisição inválida")
@@ -329,45 +252,39 @@ export async function POST(request: Request) {
     const goal = sanitizeInput(String(body.goal || "").trim())
     const numVariations = clamp(Number(body.numVariations || 1), MIN_VARIATIONS, MAX_VARIATIONS)
 
-    if (!isAdmin && (userData.credits ?? 0) < 1) {
-      throw new InsufficientCreditsError(1, userData.credits ?? 0)
-    }
+    if (!isAdmin && (userData.credits ?? 0) < 1) throw new InsufficientCreditsError(1, userData.credits ?? 0)
 
+    // geração iterativa (1 variação por chamada)
     const results: CaptionResult[] = []
     for (let i = 0; i < numVariations; i++) {
       try {
         const one = await generateOneVariation(businessDescription, tone, platform, goal)
         results.push(one)
       } catch (err) {
-        console.error("Erro na geração de legenda: ", toErr(err))
+        // tenta 1 retry (ainda curtíssimo)
         try {
-          const retry = await generateOneVariation(businessDescription, tone, platform, goal)
-          results.push(retry)
+          const one = await generateOneVariation(businessDescription, tone, platform, goal)
+          results.push(one)
         } catch (retryErr) {
-          console.error("Retry falhou: ", toErr(retryErr))
           if (results.length === 0) throw retryErr
           break
         }
       }
     }
-
     if (results.length === 0) {
-      throw new Error("Não foi possível gerar nenhuma legenda (modelo retornou saída vazia ou inválida).")
+      throw new Error("Não foi possível gerar nenhuma legenda (saída vazia/inválida).")
     }
 
-    const costEstimate = 0
+    // débito 1 crédito por requisição
     let creditsRemaining = userData.credits ?? 0
-
     if (!isAdmin) {
       const newCredits = Math.max(0, (userData.credits ?? 0) - 1)
-      const { error: updateError } = await supabase
-        .from("users")
-        .update({ credits: newCredits })
-        .eq("id", user.id)
+      const { error: updateError } = await supabase.from("users").update({ credits: newCredits }).eq("id", user.id)
       if (updateError) throw new Error("Erro ao processar créditos")
       creditsRemaining = newCredits
     }
 
+    // salva primeiro
     try {
       const first = results[0]
       if (first) {
@@ -381,28 +298,23 @@ export async function POST(request: Request) {
           credits_used: isAdmin ? 0 : 1,
         })
       }
-    } catch (err) {
-      console.error("Erro ao salvar post: ", toErr(err))
-    }
+    } catch {}
 
+    // log de uso (opcional)
     try {
       await supabase.from("usage_logs").insert({
         user_id: user.id,
         action: "generate_caption",
         credits_used: isAdmin ? 0 : 1,
-        cost_usd: costEstimate,
+        cost_usd: 0,
         metadata: {
-          tone,
-          platform,
-          goal,
+          tone, platform, goal,
           model: MODEL(),
           numVariations,
-          strategy: "per-variation-calls",
+          strategy: "per-variation-calls + json_schema",
         },
       })
-    } catch (err) {
-      console.error("Erro ao registrar uso: ", toErr(err))
-    }
+    } catch {}
 
     return NextResponse.json({
       results,

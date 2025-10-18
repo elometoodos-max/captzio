@@ -96,7 +96,7 @@ export async function POST(request: Request) {
 
     console.log("[caption] calling Responses API with model:", config.openai.models.caption)
 
-    // Chamada da Responses API (sem temperature; usa text.format)
+    // Chamada da Responses API (sem temperature; usa text.format com name obrigatório)
     const openaiResponse = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
@@ -109,32 +109,30 @@ export async function POST(request: Request) {
         input: [{ role: "user", content: userPrompt }],
         max_output_tokens: 1000,
 
-        // ✅ Novo formato da API
+        // ✅ Novo formato: 'text.format' com 'name' no próprio objeto
         text: {
           format: {
             type: "json_schema",
-            json_schema: {
-              name: "CaptionArray",
-              schema: {
-                type: "array",
-                minItems: 1,
-                items: {
-                  type: "object",
-                  additionalProperties: false,
-                  required: ["caption", "cta", "hashtags"],
-                  properties: {
-                    caption: { type: "string", minLength: 1 },
-                    cta: { type: "string", minLength: 1 },
-                    hashtags: {
-                      type: "array",
-                      minItems: 3,
-                      maxItems: 10,
-                      items: { type: "string", pattern: "^#?\\w[\\w\\d_]*$" },
-                    },
+            name: "CaptionArray",
+            strict: true,
+            schema: {
+              type: "array",
+              minItems: 1,
+              items: {
+                type: "object",
+                additionalProperties: false,
+                required: ["caption", "cta", "hashtags"],
+                properties: {
+                  caption: { type: "string", minLength: 1 },
+                  cta: { type: "string", minLength: 1 },
+                  hashtags: {
+                    type: "array",
+                    minItems: 3,
+                    maxItems: 10,
+                    items: { type: "string", pattern: "^#?\\w[\\w\\d_]*$" },
                   },
                 },
               },
-              strict: true,
             },
           },
         },
@@ -224,7 +222,7 @@ export async function POST(request: Request) {
       },
     })
 
-    // Retorna resultado final
+    // Retorno
     return NextResponse.json({
       results,
       creditsRemaining: isAdmin ? "∞" : userData.credits - 1,

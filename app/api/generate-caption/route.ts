@@ -27,17 +27,14 @@ interface CaptionResult {
   hashtags: string[]
 }
 
-// Helper para extrair texto da Responses API, cobrindo todos os formatos conhecidos.
+// Extrai texto da Responses API cobrindo formatos conhecidos
 function extractResponseText(resp: any): string | undefined {
-  // 1) Campo direto (mais comum)
   const t1 = resp?.output_text
   if (typeof t1 === "string" && t1.trim()) return t1.trim()
 
-  // 2) Estrutura por "output[].content[].text"
   const t2 = resp?.output?.[0]?.content?.[0]?.text
   if (typeof t2 === "string" && t2.trim()) return t2.trim()
 
-  // 3) Alguns retornam em "data[]" (streams agregadas)
   if (Array.isArray(resp?.data)) {
     const parts: string[] = []
     for (const item of resp.data) {
@@ -47,8 +44,6 @@ function extractResponseText(resp: any): string | undefined {
     const joined = parts.join("").trim()
     if (joined) return joined
   }
-
-  // 4) Último recurso: stringify para debug (não recomendado em prod)
   return undefined
 }
 
@@ -65,11 +60,11 @@ export async function POST(request: Request) {
     if (authError || !user) throw new AuthenticationError()
     console.log("[caption] user:", user.id)
 
-    // Rate limit: 10/hora
+    // Rate limit: 10/h
     const rateLimit = checkRateLimit(`caption:${user.id}`, 10, 3600000)
     if (!rateLimit.allowed) throw new RateLimitError(rateLimit.resetAt)
 
-    // Carrega usuário e créditos
+    // Usuário + créditos
     const { data: userData, error: userError } = await supabase
       .from("users")
       .select("*")
@@ -79,7 +74,7 @@ export async function POST(request: Request) {
     if (userError || !userData) throw new NotFoundError("Usuário")
     const isAdmin = userData.role === "admin" || user.email === config.admin.email
 
-    // Corpo + validação
+    // Body + validação
     const body: CaptionRequest = await request.json()
     const validation = validateCaptionRequest(body)
     if (!validation.valid) throw new ValidationError(validation.error!)
@@ -88,21 +83,20 @@ export async function POST(request: Request) {
     const sanitizedDescription = sanitizeInput(businessDescription)
     const sanitizedGoal = sanitizeInput(goal)
 
-    if (!isAdmin && userData.credits < 1) {
+    if (!isAdmin && userData.credits < 1)
       throw new InsufficientCreditsError(1, userData.credits)
-    }
 
-    // Prompt: simples e direto (sem cercar com ```), pois usamos JSON Schema na resposta
+    // Prompt para GPT-5 Nano (Responses API)
     const userPrompt =
       `Você é um copywriter brasileiro especializado em redes sociais.\n` +
       `Gere ${numVariations} variantes de legenda em português para o negócio: ${sanitizedDescription}.\n` +
       `Tom: ${tone}.\nPlataforma: ${platform}.\nObjetivo: ${sanitizedGoal}.\n` +
       `Cada legenda deve ter: 1–3 emojis, 1 linha de CTA e 5 hashtags relevantes.\n` +
-      `Retorne APENAS no formato do schema fornecido.`
+      `Responda APENAS no formato do schema fornecido.`
 
     console.log("[caption] calling Responses API with model:", config.openai.models.caption)
 
-    // Chamada na Responses API (correta para GPT-5 Nano). Sem 'temperature'. Usa max_output_tokens.
+    // Chamada da Responses API (sem temperature; usa text.format)
     const openaiResponse = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
@@ -111,45 +105,39 @@ export async function POST(request: Request) {
       },
       body: JSON.stringify({
         model: config.openai.models.caption, // ex.: "gpt-5-nano"
-        // Instrução mínima para manter JSON válido
         instructions: "Responda exclusivamente com JSON válido, conforme o schema.",
-
-        // Conteúdo do usuário
-        input: [
-          { role: "user", content: userPrompt }
-        ],
-
-        // Limite de saída (substitui max_tokens)
+        input: [{ role: "user", content: userPrompt }],
         max_output_tokens: 1000,
 
-        // Força JSON conforme schema (evita texto solto e blocos markdown)
-        response_format: {
-          type: "json_schema",
-          json_schema: {
-            name: "CaptionArray",
-            // Schema de um array de objetos { caption, cta, hashtags[] }
-            schema: {
-              type: "array",
-              minItems: 1,
-              items: {
-                type: "object",
-                additionalProperties: false,
-                required: ["caption", "cta", "hashtags"],
-                properties: {
-                  caption: { type: "string", minLength: 1 },
-                  cta: { type: "string", minLength: 1 },
-                  hashtags: {
-                    type: "array",
-                    minItems: 3,
-                    maxItems: 10,
-                    items: { type: "string", pattern: "^#?\\w[\\w\\d_]*$" }
-                  }
-                }
-              }
+        // ✅ Novo formato da API
+        text: {
+          format: {
+            type: "json_schema",
+            json_schema: {
+              name: "CaptionArray",
+              schema: {
+                type: "array",
+                minItems: 1,
+                items: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["caption", "cta", "hashtags"],
+                  properties: {
+                    caption: { type: "string", minLength: 1 },
+                    cta: { type: "string", minLength: 1 },
+                    hashtags: {
+                      type: "array",
+                      minItems: 3,
+                      maxItems: 10,
+                      items: { type: "string", pattern: "^#?\\w[\\w\\d_]*$" },
+                    },
+                  },
+                },
+              },
+              strict: true,
             },
-            strict: true
-          }
-        }
+          },
+        },
       }),
     })
 
@@ -165,7 +153,7 @@ export async function POST(request: Request) {
       throw new Error(`Erro ao gerar legendas com IA: ${errMsg}`)
     }
 
-    // Parse da Responses API
+    // Leitura da resposta
     const ai = await openaiResponse.json()
     const text = extractResponseText(ai)
     if (!text) {
@@ -182,14 +170,13 @@ export async function POST(request: Request) {
       throw new Error("Erro ao processar resposta da IA (JSON inválido)")
     }
 
-    // Tokens e custo (estimativa simples; ajuste conforme pricing real do modelo)
+    // Tokens e custo estimado
     const usage = ai?.usage ?? {}
     const tokensUsed =
-      usage?.total_tokens ??
-      ((usage?.output_tokens ?? 0) + (usage?.input_tokens ?? 0))
+      usage?.total_tokens ?? ((usage?.output_tokens ?? 0) + (usage?.input_tokens ?? 0))
     const costEstimate = (tokensUsed / 1_000_000) * 0.45
 
-    // Débito de crédito (não-admin)
+    // Debita crédito (não-admin)
     if (!isAdmin) {
       const { error: updateError } = await supabase
         .from("users")
@@ -201,7 +188,7 @@ export async function POST(request: Request) {
       }
     }
 
-    // Persistência (primeiro item)
+    // Persiste primeiro resultado
     try {
       const first = results[0] || { caption: "", hashtags: [], cta: "" }
       await supabase.from("posts").insert({
@@ -215,7 +202,6 @@ export async function POST(request: Request) {
       })
     } catch (saveError) {
       console.error("[caption] save error:", saveError)
-      // não bloqueia a resposta
     }
 
     // Log de uso
@@ -238,6 +224,7 @@ export async function POST(request: Request) {
       },
     })
 
+    // Retorna resultado final
     return NextResponse.json({
       results,
       creditsRemaining: isAdmin ? "∞" : userData.credits - 1,

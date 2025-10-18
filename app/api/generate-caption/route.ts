@@ -13,7 +13,6 @@ import {
   RateLimitError,
 } from "@/lib/error-handler"
 
-// ===== Tipos =====
 interface CaptionRequest {
   businessDescription: string
   tone: string
@@ -32,157 +31,187 @@ const MIN_VARIATIONS = 1
 const RESPONSES_ENDPOINT = "https://api.openai.com/v1/responses"
 const MODEL = () => config.openai.models.caption // ex.: "gpt-5-nano"
 
-// ===== Utils =====
-function clamp(n: number, min: number, max: number) {
-  return Math.min(Math.max(n, min), max)
-}
-function toErrorMessage(e: unknown): string {
-  if (e instanceof Error) return e.message
-  try { return JSON.stringify(e) } catch { return String(e) }
-}
-async function safeJson(res: Response) {
-  try { return await res.json() } catch { return null }
-}
-function sleep(ms: number) { return new Promise((r) => setTimeout(r, ms)) }
+// ---------- helpers básicos ----------
+const clamp = (n: number, min: number, max: number) => Math.min(Math.max(n, min), max)
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+const toErrorMessage = (e: unknown) => (e instanceof Error ? e.message : (()=>{try{return JSON.stringify(e)}catch{return String(e)}})())
 
-function stripCodeFences(s: string): string {
+const stripCodeFences = (s: string) => {
   const m = s.match(/```json\s*([\s\S]*?)```/i) || s.match(/```\s*([\s\S]*?)```/i)
-  return m ? m[1].trim() : s.trim()
-}
-function keySummary(obj: any): string {
-  try {
-    const keys = Object.keys(obj || {})
-    const sample = Array.isArray(obj?.output) ? ` output.len=${obj.output.length}` : ""
-    return `keys=[${keys.join(",")}],${sample}`
-  } catch { return "keys=?"; }
+  return (m ? m[1] : s).trim()
 }
 
-// ===== Extrator recursivo ultra-tolerante =====
-type Extracted = { text?: string; json?: any }
-function extractResponsePayload(resp: any): Extracted {
-  const out: Extracted = {}
+// ---------- validações ----------
+function isValidCaption(item: any): item is CaptionResult {
+  return (
+    item &&
+    typeof item.caption === "string" &&
+    item.caption.trim() &&
+    typeof item.cta === "string" &&
+    item.cta.trim() &&
+    Array.isArray(item.hashtags) &&
+    item.hashtags.length >= 3 &&
+    item.hashtags.length <= 10 &&
+    item.hashtags.every((h) => typeof h === "string" && h.trim())
+  )
+}
+function isValidCaptionArray(arr: any): arr is CaptionResult[] {
+  return Array.isArray(arr) && arr.length > 0 && arr.every(isValidCaption)
+}
+
+// ---------- extração/varredura do payload ----------
+function extractResponsePayload(resp: any): { text?: string; json?: any } {
   const texts: string[] = []
+  let json: any = undefined
 
   const visit = (node: any) => {
     if (!node) return
-    const typ = typeof node
-
-    if (typ === "string") {
+    if (typeof node === "string") {
       const t = node.trim()
       if (t) texts.push(t)
       return
     }
-
     if (Array.isArray(node)) {
-      for (const item of node) visit(item)
+      for (const v of node) visit(v)
       return
     }
-
-    if (typ === "object") {
-      // Campos comuns
-      if (typeof node.text === "string" && node.text.trim()) texts.push(node.text.trim())
-      if (!out.json && node.json && typeof node.json === "object") out.json = node.json
-      if (!out.json && node.object && typeof node.object === "object") out.json = node.object
-      if (!out.json && node.data && typeof node.data === "object") out.json = node.data
-      if (!out.json && node.result && typeof node.result === "object") out.json = node.result
-
-      // Alguns modelos devolvem tudo em output_text na raiz
-      if (typeof node.output_text === "string" && node.output_text.trim()) texts.push(node.output_text.trim())
-
-      // Varre todos os campos recursivamente
-      for (const k of Object.keys(node)) {
-        const v = (node as any)[k]
-        if (v && (typeof v === "object" || typeof v === "string")) visit(v)
-      }
+    if (typeof node === "object") {
+      if (typeof (node as any).text === "string" && (node as any).text.trim()) texts.push((node as any).text.trim())
+      if (!json && (node as any).json && typeof (node as any).json === "object") json = (node as any).json
+      if (!json && (node as any).object && typeof (node as any).object === "object") json = (node as any).object
+      if (!json && (node as any).data && typeof (node as any).data === "object") json = (node as any).data
+      if (!json && (node as any).result && typeof (node as any).result === "object") json = (node as any).result
+      if (typeof (node as any).output_text === "string" && (node as any).output_text.trim()) texts.push((node as any).output_text.trim())
+      for (const k of Object.keys(node)) visit((node as any)[k])
     }
   }
-
-  // Caminhos prováveis
   visit(resp)
-  // Consolida texto
-  const joined = texts.join("").trim()
-  if (joined) out.text = joined
-  return out
+
+  const text = texts.join("").trim() || undefined
+  return { text, json }
 }
 
-function isValidCaptionArray(arr: any): arr is CaptionResult[] {
-  if (!Array.isArray(arr) || arr.length < 1) return false
-  return arr.every((item) =>
-    item &&
-    typeof item.caption === "string" && item.caption.trim().length > 0 &&
-    typeof item.cta === "string" && item.cta.trim().length > 0 &&
-    Array.isArray(item.hashtags) &&
-    item.hashtags.length >= 3 && item.hashtags.length <= 10 &&
-    item.hashtags.every((h: any) => typeof h === "string" && h.trim().length > 0)
-  )
+// ---------- reparo de JSON ruim vindo como texto ----------
+function normalizeQuotes(s: string): string {
+  return s
+    .replace(/[\u201C\u201D\u2033]/g, '"') // aspas duplas “ ”
+    .replace(/[\u2018\u2019\u2032]/g, "'") // aspas simples ‘ ’
+}
+function removeTrailingCommas(s: string): string {
+  return s.replace(/,\s*([}\]])/g, "$1")
+}
+function coerceSingleToDoubleQuotes(s: string): string {
+  // cuidado: isso é heurístico; cobre a maioria dos casos simples
+  // chaves: 'key': -> "key":
+  s = s.replace(/'(\w+?)'\s*:/g, '"$1":')
+  // strings: : 'value' -> : "value"
+  s = s.replace(/:\s*'([^']*)'/g, ': "$1"')
+  return s
+}
+function sliceToJsonish(s: string): string {
+  const start = Math.min(...['{','['].map(ch => {const i=s.indexOf(ch); return i<0?1e9:i}))
+  const endBrace = s.lastIndexOf('}')
+  const endBracket = s.lastIndexOf(']')
+  const end = Math.max(endBrace, endBracket)
+  if (start === 1e9 || end < start) return s
+  return s.slice(start, end + 1)
+}
+function tryParseMany(raw: string): any {
+  let t = stripCodeFences(raw)
+  t = normalizeQuotes(t)
+  t = sliceToJsonish(t)
+  // 1) tentativa direta
+  try { return JSON.parse(t) } catch {}
+  // 2) remove vírgulas finais
+  try { return JSON.parse(removeTrailingCommas(t)) } catch {}
+  // 3) converte aspas simples simples
+  try { return JSON.parse(coerceSingleToDoubleQuotes(removeTrailingCommas(t))) } catch {}
+  // 4) fallback extremo (eval style) — aceita JSON5-like
+  try {
+    // eslint-disable-next-line no-new-func
+    const val = Function(`"use strict"; return (${coerceSingleToDoubleQuotes(removeTrailingCommas(t))});`)()
+    if (val && (typeof val === "object")) return val
+  } catch {}
+  return undefined
 }
 
-// ===== OpenAI (timeout simples) =====
-async function callOpenAI(payload: any, { timeoutMs = 25000 }: { timeoutMs?: number } = {}) {
+// ---------- acha o array de legendas em qualquer estrutura ----------
+function findCaptionsAnywhere(root: any): CaptionResult[] | undefined {
+  if (isValidCaptionArray(root)) return root
+  if (root && typeof root === "object") {
+    if (isValidCaptionArray(root.results)) return root.results
+    if (isValidCaptionArray(root.items)) return root.items
+    if (isValidCaption(root)) return [root]
+    for (const k of Object.keys(root)) {
+      const found = findCaptionsAnywhere((root as any)[k])
+      if (found) return found
+    }
+  }
+  if (Array.isArray(root)) {
+    for (const v of root) {
+      const found = findCaptionsAnywhere(v)
+      if (found) return found
+    }
+  }
+  return undefined
+}
+
+// ---------- chamada OpenAI ----------
+async function callOpenAI(payload: any, timeoutMs = 25000) {
   const ac = new AbortController()
   const timer = setTimeout(() => ac.abort(), timeoutMs)
   try {
     const res = await fetch(RESPONSES_ENDPOINT, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${config.openai.apiKey}`,
-      },
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${config.openai.apiKey}` },
       body: JSON.stringify(payload),
       signal: ac.signal,
     })
+    const body = await res.json().catch(() => ({}))
     if (!res.ok) {
-      const body = await safeJson(res)
-      throw new Error(body?.error?.message || `OpenAI HTTP ${res.status}`)
+      throw new Error((body as any)?.error?.message || `OpenAI HTTP ${res.status}`)
     }
-    return await res.json()
+    return body
   } finally {
     clearTimeout(timer)
   }
 }
 
-// ===== Payloads =====
-function payloadJsonObject(userPrompt: string) {
-  return {
-    model: MODEL(),
-    instructions: "Responda exclusivamente com JSON válido.",
-    input: [
-      { role: "user", content: [{ type: "input_text", text: userPrompt }] },
-    ],
-    max_output_tokens: 1000,
-    text: { format: { type: "json_object" } },
-  }
-}
-function payloadText(userPrompt: string) {
-  return {
-    model: MODEL(),
-    instructions: "Responda com um JSON válido (sem markdown).",
-    input: [{ role: "user", content: [{ type: "input_text", text: userPrompt }] }],
-    max_output_tokens: 1000,
-    text: { format: { type: "text" } },
-  }
-}
+// ---------- payloads ----------
+const payloadJsonObj = (prompt: string) => ({
+  model: MODEL(),
+  instructions: "Responda exclusivamente com JSON válido.",
+  input: [{ role: "user", content: [{ type: "input_text", text: prompt }] }],
+  max_output_tokens: 1000,
+  text: { format: { type: "json_object" } },
+})
+const payloadText = (prompt: string) => ({
+  model: MODEL(),
+  instructions: "Responda com um JSON válido (sem markdown).",
+  input: [{ role: "user", content: [{ type: "input_text", text: prompt }] }],
+  max_output_tokens: 1000,
+  text: { format: { type: "text" } },
+})
 
-// ===== Handler =====
+// ---------- handler ----------
 export async function POST(request: Request) {
   try {
     const supabase = await createClient()
 
-    // Auth
+    // auth
     const { data: { user }, error: authError } = await supabase.auth.getUser()
     if (authError || !user) throw new AuthenticationError()
 
-    // Rate limit
+    // rate limit
     const rateLimit = checkRateLimit(`caption:${user.id}`, 10, 3600000)
     if (!rateLimit.allowed) throw new RateLimitError(rateLimit.resetAt)
 
-    // User + créditos
-    const { data: userData, error: userError } = await supabase
-      .from("users").select("*").eq("id", user.id).single()
+    // usuário
+    const { data: userData, error: userError } = await supabase.from("users").select("*").eq("id", user.id).single()
     if (userError || !userData) throw new NotFoundError("Usuário")
     const isAdmin = userData.role === "admin" || user.email === config.admin.email
 
-    // Body + validação
+    // body
     const body: CaptionRequest = await request.json()
     const validation = validateCaptionRequest(body)
     if (!validation.valid) throw new ValidationError(validation.error!)
@@ -193,14 +222,12 @@ export async function POST(request: Request) {
     const goal = String(body.goal || "").trim()
     const numVariations = clamp(Number(body.numVariations || 1), MIN_VARIATIONS, MAX_VARIATIONS)
 
-    if (!isAdmin && (userData.credits ?? 0) < 1)
-      throw new InsufficientCreditsError(1, userData.credits ?? 0)
+    if (!isAdmin && (userData.credits ?? 0) < 1) throw new InsufficientCreditsError(1, userData.credits ?? 0)
 
     const sanitizedDescription = sanitizeInput(businessDescription)
     const sanitizedGoal = sanitizeInput(goal)
 
-    // Prompt
-    const userPrompt =
+    const prompt =
       `Você é um copywriter brasileiro especializado em redes sociais.\n` +
       `Gere ${numVariations} variantes de legenda em português para: ${sanitizedDescription}.\n` +
       `Tom: ${tone || "neutro/profissional"}.\nPlataforma: ${platform || "Instagram"}.\n` +
@@ -208,51 +235,45 @@ export async function POST(request: Request) {
       `Cada legenda: 1–3 emojis, 1 linha de CTA e 5 hashtags relevantes.\n` +
       `Responda APENAS um JSON com "results": [{ "caption": string, "cta": string, "hashtags": string[] }].`
 
-    // 1) Tenta JSON-obj
-    let ai = await callOpenAI(payloadJsonObject(userPrompt))
-    let { text: outText, json: outJson } = extractResponsePayload(ai)
+    // 1) tenta json_object
+    let ai = await callOpenAI(payloadJsonObj(prompt))
+    let { text, json } = extractResponsePayload(ai)
 
-    // 2) Fallback: texto livre
-    if (!outText && !outJson) {
-      ai = await callOpenAI(payloadText(userPrompt))
-      ;({ text: outText, json: outJson } = extractResponsePayload(ai))
+    // 2) fallback texto
+    if (!text && !json) {
+      ai = await callOpenAI(payloadText(prompt))
+      ;({ text, json } = extractResponsePayload(ai))
     }
 
-    if (!outText && !outJson) {
-      const diag = keySummary(ai)
+    if (!text && !json) {
+      const diag = `keys=[${Object.keys(ai || {}).join(",")}], output.len=${Array.isArray(ai?.output) ? ai.output.length : 0}`
       throw new Error(`Resposta vazia da IA (diag: ${diag})`)
     }
 
-    // Parse + validação
-    let results: CaptionResult[]
-    try {
-      const root = outJson ?? JSON.parse(stripCodeFences(outText!))
-      const arr = root?.results
-      if (!isValidCaptionArray(arr))
-        throw new Error("JSON não corresponde ao formato esperado (object.results[])")
-      results = arr as CaptionResult[]
-    } catch (e) {
-      const diag = keySummary(ai)
-      console.error("[caption] JSON parse/shape error", { diag, rawText: outText, rawJson: outJson, err: toErrorMessage(e) })
+    // parse robusto
+    const root = json ?? tryParseMany(text!)
+    const results = findCaptionsAnywhere(root)
+    if (!results) {
+      const preview = typeof text === "string" ? text.slice(0, 200) : JSON.stringify(root)?.slice(0, 200)
+      console.error("[caption] parse/shape fail", { preview })
       throw new Error("Erro ao processar resposta da IA (JSON inválido)")
     }
 
-    // Uso/custo (estimativa simples)
+    // usage / custo
     const usage = ai?.usage ?? {}
     const tokensUsed = usage?.total_tokens ?? ((usage?.output_tokens ?? 0) + (usage?.input_tokens ?? 0))
     const costEstimate = (tokensUsed / 1_000_000) * 0.45
 
-    // Créditos
+    // créditos
     let creditsRemaining = userData.credits
     if (!isAdmin) {
       const newCredits = Math.max(0, (userData.credits ?? 0) - 1)
-      const { error: updateError } = await supabase.from("users")
-        .update({ credits: newCredits }).eq("id", user.id)
+      const { error: updateError } = await supabase.from("users").update({ credits: newCredits }).eq("id", user.id)
       if (updateError) throw new Error("Erro ao processar créditos")
       creditsRemaining = newCredits
     }
 
-    // Persistência do primeiro resultado
+    // persistência (primeiro item)
     try {
       const first = results[0]
       if (first) {
@@ -268,7 +289,7 @@ export async function POST(request: Request) {
       }
     } catch {}
 
-    // Log de uso (não bloqueante)
+    // log de uso
     try {
       await supabase.from("usage_logs").insert({
         user_id: user.id,

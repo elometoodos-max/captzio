@@ -13,7 +13,6 @@ import {
   RateLimitError,
 } from "@/lib/error-handler"
 
-// ===== Tipos =====
 interface CaptionRequest {
   businessDescription: string
   tone: string
@@ -28,30 +27,29 @@ interface CaptionResult {
   hashtags: string[]
 }
 
-// ===== Constantes =====
 const MAX_VARIATIONS = 10
 const MIN_VARIATIONS = 1
 const RESPONSES_ENDPOINT = "https://api.openai.com/v1/responses"
-const MODEL = () => config.openai.models.caption // Exemplo: "gpt-5-nano"
+const MODEL = () => config.openai.models.caption // ex.: "gpt-5-nano"
 
-// ===== Funções utilitárias =====
+// ---------- helpers ----------
 function clamp(n: number, min: number, max: number) {
   return Math.min(Math.max(n, min), max)
 }
 
 function toErrorMessage(e: unknown): string {
   if (e instanceof Error) return e.message
-  try {
-    return JSON.stringify(e)
-  } catch {
-    return String(e)
-  }
+  try { return JSON.stringify(e) } catch { return String(e) }
 }
 
+async function safeJson(res: Response) {
+  try { return await res.json() } catch { return null }
+}
+
+function sleep(ms: number) { return new Promise((r) => setTimeout(r, ms)) }
+
 function stripCodeFences(s: string): string {
-  const m =
-    s.match(/```json\s*([\s\S]*?)```/i) ||
-    s.match(/```\s*([\s\S]*?)```/i)
+  const m = s.match(/```json\s*([\s\S]*?)```/i) || s.match(/```\s*([\s\S]*?)```/i)
   return m ? m[1].trim() : s.trim()
 }
 
@@ -74,34 +72,17 @@ function extractResponseText(resp: any): string | undefined {
 
 function isValidCaptionArray(arr: any): arr is CaptionResult[] {
   if (!Array.isArray(arr) || arr.length < 1) return false
-  return arr.every((item) => {
-    return (
-      item &&
-      typeof item.caption === "string" &&
-      item.caption.trim().length > 0 &&
-      typeof item.cta === "string" &&
-      item.cta.trim().length > 0 &&
-      Array.isArray(item.hashtags) &&
-      item.hashtags.length >= 3 &&
-      item.hashtags.length <= 10 &&
-      item.hashtags.every((h: any) => typeof h === "string" && h.trim().length > 0)
-    )
-  })
+  return arr.every((item) =>
+    item &&
+    typeof item.caption === "string" && item.caption.trim().length > 0 &&
+    typeof item.cta === "string" && item.cta.trim().length > 0 &&
+    Array.isArray(item.hashtags) &&
+    item.hashtags.length >= 3 && item.hashtags.length <= 10 &&
+    item.hashtags.every((h: any) => typeof h === "string" && h.trim().length > 0)
+  )
 }
 
-async function safeJson(res: Response) {
-  try {
-    return await res.json()
-  } catch {
-    return null
-  }
-}
-
-function sleep(ms: number) {
-  return new Promise((r) => setTimeout(r, ms))
-}
-
-// ===== OpenAI com retry e timeout =====
+// ---------- OpenAI call (timeout + retries) ----------
 async function callOpenAIWithRetries(payload: any, opts?: { retries?: number; timeoutMs?: number }) {
   const retries = Math.max(0, opts?.retries ?? 2)
   const timeoutMs = Math.max(1_000, opts?.timeoutMs ?? 25_000)
@@ -123,6 +104,7 @@ async function callOpenAIWithRetries(payload: any, opts?: { retries?: number; ti
       clearTimeout(timer)
 
       if (res.ok) return res.json()
+
       if (res.status === 429 || (res.status >= 500 && res.status <= 599)) {
         lastErr = await safeJson(res)
         const backoff = 500 * Math.pow(2, attempt)
@@ -146,30 +128,29 @@ async function callOpenAIWithRetries(payload: any, opts?: { retries?: number; ti
   throw new Error(toErrorMessage(lastErr) || "Falha ao chamar OpenAI após retries")
 }
 
-// ===== Handler principal =====
+// ---------- handler ----------
 export async function POST(request: Request) {
   try {
     const supabase = await createClient()
 
-    // autenticação
+    // auth
     const {
       data: { user },
       error: authError,
     } = await supabase.auth.getUser()
     if (authError || !user) throw new AuthenticationError()
 
-    // rate limit (10/hora)
+    // rate limit (10/h)
     const rateLimit = checkRateLimit(`caption:${user.id}`, 10, 3600000)
     if (!rateLimit.allowed) throw new RateLimitError(rateLimit.resetAt)
 
-    // usuário + créditos
+    // user + credits
     const { data: userData, error: userError } = await supabase
       .from("users")
       .select("*")
       .eq("id", user.id)
       .single()
     if (userError || !userData) throw new NotFoundError("Usuário")
-
     const isAdmin = userData.role === "admin" || user.email === config.admin.email
 
     // body + validação
@@ -186,8 +167,9 @@ export async function POST(request: Request) {
     const sanitizedDescription = sanitizeInput(businessDescription)
     const sanitizedGoal = sanitizeInput(goal)
 
-    if (!isAdmin && (userData.credits ?? 0) < 1)
+    if (!isAdmin && (userData.credits ?? 0) < 1) {
       throw new InsufficientCreditsError(1, userData.credits ?? 0)
+    }
 
     // prompt
     const userPrompt =
@@ -199,13 +181,13 @@ export async function POST(request: Request) {
       `Cada legenda deve ter: 1–3 emojis, 1 linha de CTA e 5 hashtags relevantes.\n` +
       `Responda APENAS um JSON com a propriedade "results" contendo um array de objetos { "caption": string, "cta": string, "hashtags": string[] }.`
 
-    // payload simples (sem schema/response_format → compatível com GPT-5 Nano)
+    // ✅ Responses API — text.format como OBJETO
     const payload = {
       model: MODEL(),
       instructions: "Responda exclusivamente com JSON válido.",
       input: [{ role: "user", content: userPrompt }],
       max_output_tokens: 1000,
-      text: { format: "json" },
+      text: { format: { type: "json" } }, // <-- aqui está o fix
     }
 
     const ai = await callOpenAIWithRetries(payload, { retries: 2, timeoutMs: 25_000 })
@@ -228,7 +210,7 @@ export async function POST(request: Request) {
       throw new Error("Erro ao processar resposta da IA (JSON inválido)")
     }
 
-    // uso/custo (estimativa)
+    // uso/custo (estimativa simples)
     const usage = ai?.usage ?? {}
     const tokensUsed =
       usage?.total_tokens ??
@@ -247,7 +229,7 @@ export async function POST(request: Request) {
       creditsRemaining = newCredits
     }
 
-    // salva primeiro resultado (opcional)
+    // persiste primeiro resultado
     try {
       const first = results[0]
       if (first) {
@@ -265,7 +247,7 @@ export async function POST(request: Request) {
       console.error("[caption] save error:", saveError)
     }
 
-    // loga uso
+    // log de uso (não bloqueante)
     try {
       await supabase.from("usage_logs").insert({
         user_id: user.id,
@@ -289,7 +271,6 @@ export async function POST(request: Request) {
       console.error("[caption] usage log error:", logErr)
     }
 
-    // resposta final
     return NextResponse.json({
       results,
       creditsRemaining: isAdmin ? "∞" : creditsRemaining,

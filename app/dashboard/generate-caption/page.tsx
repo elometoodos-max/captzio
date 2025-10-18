@@ -1,372 +1,388 @@
-"use client"
+import { NextResponse } from "next/server"
+import { createClient } from "@/lib/supabase/server"
+import { config } from "@/lib/config"
+import { validateCaptionRequest, sanitizeInput } from "@/lib/validation"
+import { checkRateLimit } from "@/lib/rate-limit"
+import {
+  handleError,
+  AuthenticationError,
+  NotFoundError,
+  InsufficientCreditsError,
+  ValidationError,
+  RateLimitError,
+} from "@/lib/error-handler"
 
-import type React from "react"
-
-import { useState, useEffect } from "react"
-import { useRouter } from "next/navigation"
-import Link from "next/link"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Sparkles, Copy, Check, ArrowLeft, Loader2, Crown, AlertCircle, Save } from "lucide-react"
-import { Logo } from "@/components/logo"
-import { Alert, AlertDescription } from "@/components/ui/alert"
-
+// ===== Tipos =====
+interface CaptionRequest {
+  businessDescription: string
+  tone: string
+  platform: string
+  goal: string
+  numVariations: number
+}
 interface CaptionResult {
   caption: string
   cta: string
   hashtags: string[]
 }
 
-export default function GenerateCaptionPage() {
-  const router = useRouter()
-  const [businessDescription, setBusinessDescription] = useState("")
-  const [tone, setTone] = useState("profissional")
-  const [platform, setPlatform] = useState("instagram")
-  const [goal, setGoal] = useState("")
-  const [isLoading, setIsLoading] = useState(false)
-  const [results, setResults] = useState<CaptionResult[]>([])
-  const [error, setError] = useState<string | null>(null)
-  const [copiedIndex, setCopiedIndex] = useState<number | null>(null)
-  const [isAdmin, setIsAdmin] = useState(false)
-  const [creditsRemaining, setCreditsRemaining] = useState<number | string>(0)
-  const [savedToLibrary, setSavedToLibrary] = useState<boolean[]>([])
+// ===== Constantes =====
+const RESPONSES_ENDPOINT = "https://api.openai.com/v1/responses"
+const MODEL = () => config.openai.models.caption // ex.: "gpt-5-nano"
+const MAX_VARIATIONS = 10
+const MIN_VARIATIONS = 1
 
-  useEffect(() => {
-    const savedDraft = localStorage.getItem("caption-draft")
-    if (savedDraft) {
-      try {
-        const draft = JSON.parse(savedDraft)
-        setBusinessDescription(draft.businessDescription || "")
-        setTone(draft.tone || "profissional")
-        setPlatform(draft.platform || "instagram")
-        setGoal(draft.goal || "")
-      } catch (e) {
-        console.error("[v0] Failed to load draft:", e)
-      }
-    }
-  }, [])
+// Nano: saídas curtíssimas
+const MAX_OUTPUT_TOKENS_SCHEMA = 200
+const MAX_OUTPUT_TOKENS_TEXT   = 240
+const MAX_OUTPUT_TOKENS_PLAIN  = 260
 
-  useEffect(() => {
-    const draft = { businessDescription, tone, platform, goal }
-    localStorage.setItem("caption-draft", JSON.stringify(draft))
-  }, [businessDescription, tone, platform, goal])
+// ===== Utils =====
+const clamp = (n: number, min: number, max: number) => Math.min(Math.max(n, min), max)
+const slice = (s: string, n = 240) => (s && s.length > n ? s.slice(0, n) + "..." : s || "")
+const toErr = (e: unknown) => (e instanceof Error ? e.message : (() => { try { return JSON.stringify(e) } catch { return String(e) } })())
 
-  const handleGenerate = async (e: React.FormEvent) => {
-    e.preventDefault()
+function stripCodeFences(s: string): string {
+  const m = s.match(/```json\s*([\s\S]*?)```/i) || s.match(/```\s*([\s\S]*?)```/i)
+  return (m ? m[1] : s).trim()
+}
+function normalizeQuotes(s: string): string {
+  return s.replace(/[\u201C\u201D\u2033]/g, '"').replace(/[\u2018\u2019\u2032]/g, "'")
+}
+function removeTrailingCommas(s: string): string {
+  return s.replace(/,\s*([}\]])/g, "$1")
+}
+function coerceSingleToDoubleQuotes(s: string): string {
+  s = s.replace(/'(\w+?)'\s*:/g, '"$1":')
+  s = s.replace(/:\s*'([^']*)'/g, ': "$1"')
+  return s
+}
 
-    if (!businessDescription.trim()) {
-      setError("Por favor, descreva seu negócio ou conteúdo")
-      return
-    }
-
-    if (businessDescription.trim().length < 10) {
-      setError("A descrição deve ter pelo menos 10 caracteres para gerar legendas de qualidade")
-      return
-    }
-
-    setIsLoading(true)
-    setError(null)
-    setResults([])
-    setSavedToLibrary([])
-
-    try {
-      const response = await fetch("/api/generate-caption", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          businessDescription: businessDescription.trim(),
-          tone,
-          platform,
-          goal: goal.trim() || "engajamento",
-          numVariations: 3,
-        }),
-      })
-
-      const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(data.error || "Erro ao gerar legendas")
-      }
-
-      setResults(data.results)
-      setIsAdmin(data.isAdmin || false)
-      setCreditsRemaining(data.creditsRemaining)
-      setSavedToLibrary(new Array(data.results.length).fill(false))
-
-      localStorage.removeItem("caption-draft")
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Erro ao gerar legendas com IA")
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  const copyToClipboard = async (text: string, index: number) => {
-    try {
-      await navigator.clipboard.writeText(text)
-      setCopiedIndex(index)
-      setTimeout(() => setCopiedIndex(null), 2000)
-    } catch (err) {
-      console.error("[v0] Failed to copy:", err)
-      setError("Erro ao copiar para área de transferência")
-    }
-  }
-
-  const saveToLibrary = async (result: CaptionResult, index: number) => {
-    try {
-      const response = await fetch("/api/save-caption", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          caption: result.caption,
-          cta: result.cta,
-          hashtags: result.hashtags,
-          platform,
-          tone,
-        }),
-      })
-
-      if (!response.ok) {
-        throw new Error("Erro ao salvar na biblioteca")
-      }
-
-      const newSaved = [...savedToLibrary]
-      newSaved[index] = true
-      setSavedToLibrary(newSaved)
-    } catch (err) {
-      console.error("[v0] Failed to save:", err)
-      setError("Erro ao salvar na biblioteca")
-    }
-  }
-
+function isValidCaption(item: any): item is CaptionResult {
   return (
-    <div className="flex min-h-screen flex-col">
-      <header className="sticky top-0 z-50 w-full border-b border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="flex h-16 items-center justify-between">
-            <Link href="/dashboard" className="flex items-center gap-2 transition-opacity hover:opacity-80">
-              <Logo size="sm" />
-            </Link>
-            <div className="flex items-center gap-2 sm:gap-4">
-              {isAdmin && (
-                <div className="hidden sm:flex items-center gap-1 rounded-full bg-accent px-3 py-1 text-xs font-medium">
-                  <Crown className="h-3 w-3" />
-                  Admin - Teste Grátis
-                </div>
-              )}
-              {!isAdmin && creditsRemaining !== 0 && (
-                <div className="text-sm text-muted-foreground">
-                  <span className="hidden sm:inline">Créditos: </span>
-                  <span className="font-semibold text-foreground">{creditsRemaining}</span>
-                </div>
-              )}
-              <Button variant="ghost" size="sm" asChild className="transition-all hover:scale-105">
-                <Link href="/dashboard">
-                  <ArrowLeft className="mr-2 h-4 w-4" />
-                  <span className="hidden sm:inline">Voltar</span>
-                </Link>
-              </Button>
-            </div>
-          </div>
-        </div>
-      </header>
-
-      <main className="flex-1 bg-muted/30">
-        <section className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 py-6 md:py-10">
-          <div className="mx-auto max-w-6xl">
-            <div className="mb-6 md:mb-8 animate-fade-in">
-              <h1 className="mb-2 font-display text-2xl md:text-3xl font-bold">Gerar Legenda</h1>
-              <p className="text-sm md:text-base text-muted-foreground">
-                Crie legendas envolventes com IA treinada para português brasileiro
-              </p>
-            </div>
-
-            <div className="grid gap-6 lg:grid-cols-2 lg:gap-8">
-              <Card className="animate-slide-in-left">
-                <CardHeader>
-                  <CardTitle>Configurações</CardTitle>
-                  <CardDescription>Descreva seu conteúdo e escolha o estilo</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <form onSubmit={handleGenerate} className="space-y-6">
-                    <div className="space-y-2">
-                      <Label htmlFor="description">
-                        Descrição do Negócio/Conteúdo <span className="text-destructive">*</span>
-                      </Label>
-                      <Textarea
-                        id="description"
-                        placeholder="Ex: Loja de roupas femininas com foco em moda sustentável e peças atemporais. Público: mulheres 25-40 anos que valorizam qualidade e consciência ambiental..."
-                        value={businessDescription}
-                        onChange={(e) => setBusinessDescription(e.target.value)}
-                        required
-                        rows={5}
-                        disabled={isLoading}
-                        className="resize-none"
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        Mínimo 10 caracteres. Seja específico para melhores resultados.
-                      </p>
-                    </div>
-
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <div className="space-y-2">
-                        <Label htmlFor="tone">Tom de Voz</Label>
-                        <Select value={tone} onValueChange={setTone} disabled={isLoading}>
-                          <SelectTrigger id="tone">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="profissional">Profissional</SelectItem>
-                            <SelectItem value="casual">Casual</SelectItem>
-                            <SelectItem value="divertido">Divertido</SelectItem>
-                            <SelectItem value="inspirador">Inspirador</SelectItem>
-                            <SelectItem value="educativo">Educativo</SelectItem>
-                            <SelectItem value="vendas">Vendas</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor="platform">Plataforma</Label>
-                        <Select value={platform} onValueChange={setPlatform} disabled={isLoading}>
-                          <SelectTrigger id="platform">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="instagram">Instagram</SelectItem>
-                            <SelectItem value="facebook">Facebook</SelectItem>
-                            <SelectItem value="linkedin">LinkedIn</SelectItem>
-                            <SelectItem value="twitter">Twitter/X</SelectItem>
-                            <SelectItem value="tiktok">TikTok</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="goal">Objetivo (opcional)</Label>
-                      <Input
-                        id="goal"
-                        placeholder="Ex: aumentar vendas, gerar engajamento, educar audiência..."
-                        value={goal}
-                        onChange={(e) => setGoal(e.target.value)}
-                        disabled={isLoading}
-                      />
-                    </div>
-
-                    {error && (
-                      <Alert variant="destructive">
-                        <AlertCircle className="h-4 w-4" />
-                        <AlertDescription>{error}</AlertDescription>
-                      </Alert>
-                    )}
-
-                    <Button type="submit" className="w-full transition-all hover:scale-105" disabled={isLoading}>
-                      {isLoading ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Gerando legendas...
-                        </>
-                      ) : (
-                        <>
-                          <Sparkles className="mr-2 h-4 w-4" />
-                          Gerar 3 Legendas {!isAdmin && "(1 crédito)"}
-                        </>
-                      )}
-                    </Button>
-                  </form>
-                </CardContent>
-              </Card>
-
-              <div className="space-y-4 animate-slide-in-right">
-                <div className="flex items-center justify-between">
-                  <h2 className="font-semibold text-lg">Resultados</h2>
-                  {results.length > 0 && (
-                    <span className="text-sm text-muted-foreground">{results.length} variações</span>
-                  )}
-                </div>
-
-                {results.length > 0 ? (
-                  <>
-                    {results.map((result, index) => (
-                      <Card key={index} className="card-hover" style={{ animationDelay: `${index * 0.1}s` }}>
-                        <CardHeader>
-                          <div className="flex items-center justify-between">
-                            <CardTitle className="text-base">Variação {index + 1}</CardTitle>
-                            <div className="flex gap-2">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => saveToLibrary(result, index)}
-                                disabled={savedToLibrary[index]}
-                                title="Salvar na biblioteca"
-                              >
-                                {savedToLibrary[index] ? (
-                                  <Check className="h-4 w-4 text-green-500" />
-                                ) : (
-                                  <Save className="h-4 w-4" />
-                                )}
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() =>
-                                  copyToClipboard(
-                                    `${result.caption}\n\n${result.cta}\n\n${result.hashtags.join(" ")}`,
-                                    index,
-                                  )
-                                }
-                                title="Copiar tudo"
-                              >
-                                {copiedIndex === index ? (
-                                  <Check className="h-4 w-4 text-green-500" />
-                                ) : (
-                                  <Copy className="h-4 w-4" />
-                                )}
-                              </Button>
-                            </div>
-                          </div>
-                        </CardHeader>
-                        <CardContent className="space-y-4">
-                          <div className="rounded-lg bg-muted/50 p-4">
-                            <p className="mb-1 text-xs font-medium text-muted-foreground">Legenda</p>
-                            <p className="text-sm leading-relaxed whitespace-pre-wrap">{result.caption}</p>
-                          </div>
-                          <div className="rounded-lg border border-primary/20 bg-primary/5 p-3">
-                            <p className="mb-1 text-xs font-medium text-muted-foreground">Call to Action</p>
-                            <p className="text-sm font-medium text-primary">{result.cta}</p>
-                          </div>
-                          <div className="rounded-lg bg-accent/10 p-3">
-                            <p className="mb-1 text-xs font-medium text-muted-foreground">Hashtags</p>
-                            <p className="text-xs leading-relaxed text-accent-foreground">
-                              {result.hashtags.join(" ")}
-                            </p>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </>
-                ) : (
-                  <Card className="border-dashed">
-                    <CardContent className="flex min-h-[400px] items-center justify-center p-8">
-                      <div className="text-center">
-                        <Sparkles className="mx-auto mb-4 h-12 w-12 text-muted-foreground/50" />
-                        <p className="text-sm text-muted-foreground max-w-sm">
-                          Preencha o formulário e clique em "Gerar Legendas" para ver os resultados aqui
-                        </p>
-                      </div>
-                    </CardContent>
-                  </Card>
-                )}
-              </div>
-            </div>
-          </div>
-        </section>
-      </main>
-    </div>
+    item &&
+    typeof item.caption === "string" && item.caption.trim() &&
+    typeof item.cta === "string" && item.cta.trim() &&
+    Array.isArray(item.hashtags) &&
+    item.hashtags.length >= 3 && item.hashtags.length <= 5 &&
+    item.hashtags.every((h: any) => typeof h === "string" && h.trim())
   )
+}
+
+function tryParseLoose(raw: string): any | undefined {
+  let t = stripCodeFences(raw)
+  t = normalizeQuotes(t)
+  try { return JSON.parse(t) } catch {}
+  try { return JSON.parse(removeTrailingCommas(t)) } catch {}
+  try { return JSON.parse(coerceSingleToDoubleQuotes(removeTrailingCommas(t))) } catch {}
+  return undefined
+}
+
+// Extrai texto/JSON do Responses API (e detecta reasoning-only)
+function extractResponsePayload(resp: any): { text?: string; json?: any; onlyReasoning?: boolean } {
+  let textConcat = ""
+  let firstJson: any
+  let sawTextOrJson = false
+  let reasoningCount = 0
+
+  const takeText = (s?: string) => { if (typeof s === "string" && s.trim()) { textConcat += s; sawTextOrJson = true } }
+  const takeJson = (j: any) => { if (!firstJson && j && typeof j === "object") { firstJson = j; sawTextOrJson = true } }
+
+  if (typeof resp?.output_text === "string") takeText(resp.output_text)
+
+  const scanContent = (arr: any[]) => {
+    for (const c of arr) {
+      if (!c) continue
+      if (c.type === "reasoning" || c.type === "reasoning_text") { reasoningCount++; continue }
+      if (typeof c?.text === "string") takeText(c.text)
+      if (typeof c?.output_text === "string") takeText(c.output_text)
+      if (c?.json && typeof c.json === "object") takeJson(c.json)
+      if (c?.object && typeof c.object === "object") takeJson(c.object)
+      if (c?.value && typeof c.value === "string" && c.type === "text") takeText(c.value)
+    }
+  }
+
+  const outs = Array.isArray(resp?.output) ? resp.output : []
+  for (const o of outs) {
+    if (!o) continue
+    if (o.type === "reasoning") { reasoningCount++; continue }
+    if (typeof o?.output_text === "string") takeText(o.output_text)
+    const content = Array.isArray(o?.content) ? o.content : []
+    scanContent(content)
+  }
+
+  const nested = Array.isArray(resp?.response?.output) ? resp.response.output : []
+  for (const o of nested) {
+    if (!o) continue
+    if (o.type === "reasoning") { reasoningCount++; continue }
+    if (typeof o?.output_text === "string") takeText(o.output_text)
+    const content = Array.isArray(o?.content) ? o.content : []
+    scanContent(content)
+  }
+
+  if (!sawTextOrJson && outs.length > 0) firstJson = outs[0]
+
+  return {
+    text: (textConcat || "").trim() || undefined,
+    json: firstJson,
+    onlyReasoning: !sawTextOrJson && reasoningCount > 0
+  }
+}
+
+// ===== OpenAI =====
+async function callOpenAI(payload: any, timeoutMs = 18000) {
+  const ac = new AbortController()
+  const timer = setTimeout(() => ac.abort(), timeoutMs)
+  try {
+    const res = await fetch(RESPONSES_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${config.openai.apiKey}` },
+      body: JSON.stringify(payload),
+      signal: ac.signal,
+    })
+    const body = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error((body as any)?.error?.message || `OpenAI HTTP ${res.status}`)
+    return body
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+// ===== Prompts & Payloads =====
+function promptOne(desc: string, tone: string, platform: string, goal: string) {
+  return `1 legenda PT-BR. Negócio: ${desc}. Tom: ${tone || "neutro"}. Plataforma: ${platform || "Instagram"}. Objetivo: ${goal || "engajamento"}. Sem explicações; retorne só JSON.`
+}
+
+const captionJsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["caption", "cta", "hashtags"],
+  properties: {
+    caption: { type: "string", maxLength: 100 },
+    cta: { type: "string", maxLength: 80 },
+    hashtags: {
+      type: "array",
+      minItems: 3,
+      maxItems: 3,
+      items: { type: "string", maxLength: 20 }
+    }
+  }
+} as const
+
+// (1) Schema + desliga reasoning/tools
+const payloadSchema = (prompt: string) => ({
+  model: MODEL(),
+  instructions: "Devolva somente JSON que satisfaça o schema. Não explique. Não use markdown.",
+  input: [{ role: "user", content: [{ type: "input_text", text: prompt }] }],
+  max_output_tokens: MAX_OUTPUT_TOKENS_SCHEMA,
+  tool_choice: "none",
+  modalities: ["text"],
+  reasoning: { effort: "none" as const },
+  text: { format: { type: "json_schema", name: "Caption", schema: captionJsonSchema } },
+})
+
+// (2) Text (estruturado) sem reasoning/tools
+const payloadText = (prompt: string) => ({
+  model: MODEL(),
+  instructions: `Retorne apenas: {"caption":"","cta":"","hashtags":["#a","#b","#c"]} (JSON válido).`,
+  input: [{ role: "user", content: [{ type: "input_text", text: prompt }] }],
+  max_output_tokens: MAX_OUTPUT_TOKENS_TEXT,
+  tool_choice: "none",
+  modalities: ["text"],
+  reasoning: { effort: "none" as const },
+  text: { format: { type: "text" as const } },
+})
+
+// (3) Text (string simples) sem reasoning/tools — quebra reasoning-only
+const payloadPlain = (prompt: string) => ({
+  model: MODEL(),
+  instructions: `Apenas JSON válido: {"caption":"","cta":"","hashtags":["#a","#b","#c"]}. Sem markdown ou explicações.`,
+  input: prompt, // string simples (não array)
+  max_output_tokens: MAX_OUTPUT_TOKENS_PLAIN,
+  tool_choice: "none",
+  modalities: ["text"],
+  reasoning: { effort: "none" as const },
+  text: { format: { type: "text" as const } },
+})
+
+// ===== Fallback final: gera legenda via template (sem IA) =====
+function templateCaption(desc: string, goal: string): CaptionResult {
+  const core = desc.replace(/\s+/g, " ").trim().slice(0, 60)
+  const caption = `${core} que conecta de verdade. ✨`.replace(/\s{2,}/g, " ").trim().slice(0, 100)
+  const cta = goal && goal.toLowerCase().includes("venda") ? "Quer saber mais? Chame no direct." : "Comente o que achou!"
+  const base = core.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, "").split(/\s+/).filter(Boolean)
+  const uniq = Array.from(new Set(base)).slice(0, 3)
+  const hashtags = (uniq.length ? uniq : ["negocio", "brasil", "dicas"]).map(h => `#${h}`)
+  return { caption, cta, hashtags }
+}
+
+// ===== Gera UMA variação (com fallbacks) =====
+async function generateOneVariation(desc: string, tone: string, platform: string, goal: string): Promise<CaptionResult> {
+  const prompt = promptOne(desc, tone, platform, goal)
+
+  // 1) schema
+  let ai = await callOpenAI(payloadSchema(prompt))
+  let { text, json, onlyReasoning } = extractResponsePayload(ai)
+  let status: string | undefined = ai?.status
+  let reason: string | undefined = ai?.incomplete_details?.reason
+
+  // 2) text (estruturado)
+  if ((!text && !json) || status !== "completed") {
+    ai = await callOpenAI(payloadText(prompt))
+    ;({ text, json, onlyReasoning } = extractResponsePayload(ai))
+    status = ai?.status
+    reason = ai?.incomplete_details?.reason
+  }
+
+  // 3) plain string (vence reasoning-only)
+  if (onlyReasoning || (!text && !json)) {
+    ai = await callOpenAI(payloadPlain(prompt))
+    ;({ text, json, onlyReasoning } = extractResponsePayload(ai))
+    status = ai?.status
+    reason = ai?.incomplete_details?.reason
+  }
+
+  // 4) decodifica
+  let root: any = json
+  if (!root && text) root = tryParseLoose(text)
+
+  // 5) se ainda vazio (ou só reasoning), gera via template
+  if (!root || onlyReasoning) {
+    return templateCaption(desc, goal)
+  }
+
+  // 6) normaliza
+  let item: any = root
+  if (item && typeof item === "object") {
+    if (Array.isArray(item.results) && item.results.length) item = item.results[0]
+    else if (Array.isArray(item.items) && item.items.length) item = item.items[0]
+  }
+  if (!isValidCaption(item)) {
+    if (root && typeof root === "object") {
+      for (const v of Object.values(root)) {
+        if (isValidCaption(v)) { item = v; break }
+      }
+    }
+  }
+  if (!isValidCaption(item)) {
+    // último recurso: sem erro 500
+    return templateCaption(desc, goal)
+  }
+
+  const hashtags = item.hashtags.map((h: string) => (h.startsWith("#") ? h : `#${h.replace(/\s+/g, "")}`))
+  return { caption: String(item.caption).trim(), cta: String(item.cta).trim(), hashtags }
+}
+
+// ===== Handler principal =====
+export async function POST(request: Request) {
+  try {
+    const supabase = await createClient()
+
+    // auth
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    if (authError || !user) throw new AuthenticationError()
+
+    // rate limit
+    const rateLimit = checkRateLimit(`caption:${user.id}`, 10, 3_600_000)
+    if (!rateLimit.allowed) throw new RateLimitError(rateLimit.resetAt)
+
+    // usuário
+    const { data: userData, error: userError } = await supabase
+      .from("users").select("*").eq("id", user.id).single()
+    if (userError || !userData) throw new NotFoundError("Usuário")
+    const isAdmin = userData.role === "admin" || user.email === config.admin.email
+
+    // body
+    const body = (await request.json()) as CaptionRequest
+    const validation = validateCaptionRequest(body)
+    if (!validation.valid) throw new ValidationError(validation.error ?? "Requisição inválida")
+
+    const tone = sanitizeInput(String(body.tone || "").trim())
+    const platform = sanitizeInput(String(body.platform || "").trim())
+    const businessDescription = sanitizeInput(String(body.businessDescription || "").trim())
+    const goal = sanitizeInput(String(body.goal || "").trim())
+    const numVariations = clamp(Number(body.numVariations || 1), MIN_VARIATIONS, MAX_VARIATIONS)
+
+    if (!isAdmin && (userData.credits ?? 0) < 1) throw new InsufficientCreditsError(1, userData.credits ?? 0)
+
+    // geração iterativa (1 variação por chamada)
+    const results: CaptionResult[] = []
+    for (let i = 0; i < numVariations; i++) {
+      try {
+        const one = await generateOneVariation(businessDescription, tone, platform, goal)
+        results.push(one)
+      } catch (err) {
+        // 1 retry para essa posição
+        try {
+          const one = await generateOneVariation(businessDescription, tone, platform, goal)
+          results.push(one)
+        } catch (retryErr) {
+          if (results.length === 0) throw retryErr
+          break
+        }
+      }
+    }
+    if (results.length === 0) {
+      // nunca 500 — sempre retorna algo válido
+      results.push(templateCaption(businessDescription, goal))
+    }
+
+    // 1 crédito por requisição
+    let creditsRemaining = userData.credits ?? 0
+    if (!isAdmin) {
+      const newCredits = Math.max(0, (userData.credits ?? 0) - 1)
+      const { error: updateError } = await supabase.from("users").update({ credits: newCredits }).eq("id", user.id)
+      if (updateError) throw new Error("Erro ao processar créditos")
+      creditsRemaining = newCredits
+    }
+
+    // salva primeiro
+    try {
+      const first = results[0]
+      if (first) {
+        await supabase.from("posts").insert({
+          user_id: user.id,
+          caption: first.caption,
+          hashtags: first.hashtags,
+          cta: first.cta,
+          tone,
+          platform,
+          credits_used: isAdmin ? 0 : 1,
+        })
+      }
+    } catch (err) {
+      console.error("Erro ao salvar post:", toErr(err))
+    }
+
+    // log (opcional)
+    try {
+      await supabase.from("usage_logs").insert({
+        user_id: user.id,
+        action: "generate_caption",
+        credits_used: isAdmin ? 0 : 1,
+        cost_usd: 0,
+        metadata: {
+          tone, platform, goal,
+          model: MODEL(),
+          numVariations,
+          strategy: "schema→text→plain + template-fallback",
+        },
+      })
+    } catch (err) {
+      console.error("Erro ao registrar uso:", toErr(err))
+    }
+
+    return NextResponse.json({
+      results,
+      creditsRemaining: isAdmin ? "∞" : creditsRemaining,
+      isAdmin,
+      rateLimit: { remaining: rateLimit.remaining, resetAt: rateLimit.resetAt },
+    })
+  } catch (error) {
+    const errorResponse = handleError(error)
+    return NextResponse.json(
+      { error: errorResponse.message, code: errorResponse.code },
+      { status: errorResponse.statusCode },
+    )
+  }
 }

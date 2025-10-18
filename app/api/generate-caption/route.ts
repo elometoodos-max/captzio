@@ -27,12 +27,37 @@ interface CaptionResult {
   hashtags: string[]
 }
 
+// Helper para extrair texto da Responses API, cobrindo todos os formatos conhecidos.
+function extractResponseText(resp: any): string | undefined {
+  // 1) Campo direto (mais comum)
+  const t1 = resp?.output_text
+  if (typeof t1 === "string" && t1.trim()) return t1.trim()
+
+  // 2) Estrutura por "output[].content[].text"
+  const t2 = resp?.output?.[0]?.content?.[0]?.text
+  if (typeof t2 === "string" && t2.trim()) return t2.trim()
+
+  // 3) Alguns retornam em "data[]" (streams agregadas)
+  if (Array.isArray(resp?.data)) {
+    const parts: string[] = []
+    for (const item of resp.data) {
+      const piece = item?.output_text || item?.output?.[0]?.content?.[0]?.text
+      if (typeof piece === "string") parts.push(piece)
+    }
+    const joined = parts.join("").trim()
+    if (joined) return joined
+  }
+
+  // 4) Último recurso: stringify para debug (não recomendado em prod)
+  return undefined
+}
+
 export async function POST(request: Request) {
   try {
     console.log("[caption] generation started")
     const supabase = await createClient()
 
-    // auth
+    // Autenticação
     const {
       data: { user },
       error: authError,
@@ -40,11 +65,11 @@ export async function POST(request: Request) {
     if (authError || !user) throw new AuthenticationError()
     console.log("[caption] user:", user.id)
 
-    // rate limit: 10/h
+    // Rate limit: 10/hora
     const rateLimit = checkRateLimit(`caption:${user.id}`, 10, 3600000)
     if (!rateLimit.allowed) throw new RateLimitError(rateLimit.resetAt)
 
-    // user + credits
+    // Carrega usuário e créditos
     const { data: userData, error: userError } = await supabase
       .from("users")
       .select("*")
@@ -52,10 +77,9 @@ export async function POST(request: Request) {
       .single()
 
     if (userError || !userData) throw new NotFoundError("Usuário")
-
     const isAdmin = userData.role === "admin" || user.email === config.admin.email
 
-    // body + validação
+    // Corpo + validação
     const body: CaptionRequest = await request.json()
     const validation = validateCaptionRequest(body)
     if (!validation.valid) throw new ValidationError(validation.error!)
@@ -68,13 +92,18 @@ export async function POST(request: Request) {
       throw new InsufficientCreditsError(1, userData.credits)
     }
 
-    // prompt
-    const prompt = `Você é um copywriter especializado em redes sociais. Gere ${numVariations} variantes de legenda em português para o negócio: ${sanitizedDescription}. Tom: ${tone}. Plataforma: ${platform}. Objetivo: ${sanitizedGoal}. Cada legenda com 1-3 emojis, 1 linha de CTA e 5 hashtags relevantes. Retorne apenas JSON array com objetos: {"caption":"...","cta":"...","hashtags":["...","..."]}. Não explique nada.`
+    // Prompt: simples e direto (sem cercar com ```), pois usamos JSON Schema na resposta
+    const userPrompt =
+      `Você é um copywriter brasileiro especializado em redes sociais.\n` +
+      `Gere ${numVariations} variantes de legenda em português para o negócio: ${sanitizedDescription}.\n` +
+      `Tom: ${tone}.\nPlataforma: ${platform}.\nObjetivo: ${sanitizedGoal}.\n` +
+      `Cada legenda deve ter: 1–3 emojis, 1 linha de CTA e 5 hashtags relevantes.\n` +
+      `Retorne APENAS no formato do schema fornecido.`
 
-    console.log("[caption] calling OpenAI model:", config.openai.models.caption)
+    console.log("[caption] calling Responses API with model:", config.openai.models.caption)
 
-    // Open GPT-5 Nano: sem temperature; usar max_completion_tokens
-    const openaiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
+    // Chamada na Responses API (correta para GPT-5 Nano). Sem 'temperature'. Usa max_output_tokens.
+    const openaiResponse = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -82,15 +111,45 @@ export async function POST(request: Request) {
       },
       body: JSON.stringify({
         model: config.openai.models.caption, // ex.: "gpt-5-nano"
-        messages: [
-          {
-            role: "system",
-            content:
-              "Você é um especialista em copywriting para redes sociais. Sempre retorne respostas em JSON válido.",
-          },
-          { role: "user", content: prompt },
+        // Instrução mínima para manter JSON válido
+        instructions: "Responda exclusivamente com JSON válido, conforme o schema.",
+
+        // Conteúdo do usuário
+        input: [
+          { role: "user", content: userPrompt }
         ],
-        max_completion_tokens: 1000, // substitui max_tokens
+
+        // Limite de saída (substitui max_tokens)
+        max_output_tokens: 1000,
+
+        // Força JSON conforme schema (evita texto solto e blocos markdown)
+        response_format: {
+          type: "json_schema",
+          json_schema: {
+            name: "CaptionArray",
+            // Schema de um array de objetos { caption, cta, hashtags[] }
+            schema: {
+              type: "array",
+              minItems: 1,
+              items: {
+                type: "object",
+                additionalProperties: false,
+                required: ["caption", "cta", "hashtags"],
+                properties: {
+                  caption: { type: "string", minLength: 1 },
+                  cta: { type: "string", minLength: 1 },
+                  hashtags: {
+                    type: "array",
+                    minItems: 3,
+                    maxItems: 10,
+                    items: { type: "string", pattern: "^#?\\w[\\w\\d_]*$" }
+                  }
+                }
+              }
+            },
+            strict: true
+          }
+        }
       }),
     })
 
@@ -106,48 +165,43 @@ export async function POST(request: Request) {
       throw new Error(`Erro ao gerar legendas com IA: ${errMsg}`)
     }
 
-    const openaiData = await openaiResponse.json()
-    const content: string | undefined = openaiData?.choices?.[0]?.message?.content
-    if (!content) throw new Error("Resposta vazia da IA")
-
-    // parsing robusto: aceita JSON puro ou cercado por ```json ... ```
-    const extractJson = (txt: string): string => {
-      const fenced =
-        txt.match(/```json\s*([\s\S]*?)```/i) ||
-        txt.match(/```\s*([\s\S]*?)```/i)
-      return fenced ? fenced[1].trim() : txt.trim()
+    // Parse da Responses API
+    const ai = await openaiResponse.json()
+    const text = extractResponseText(ai)
+    if (!text) {
+      console.error("[caption] empty output from model:", ai)
+      throw new Error("Resposta vazia da IA")
     }
 
     let results: CaptionResult[]
     try {
-      const jsonString = extractJson(content)
-      const parsed = JSON.parse(jsonString)
+      const parsed = JSON.parse(text)
       results = Array.isArray(parsed) ? parsed : [parsed]
-    } catch (parseError) {
-      console.error("[caption] parse failure; content:", content)
-      throw new Error("Erro ao processar resposta da IA")
+    } catch (e) {
+      console.error("[caption] JSON parse error. Raw text:", text)
+      throw new Error("Erro ao processar resposta da IA (JSON inválido)")
     }
 
-    // tokens e custo (estimativa simples)
+    // Tokens e custo (estimativa simples; ajuste conforme pricing real do modelo)
+    const usage = ai?.usage ?? {}
     const tokensUsed =
-      openaiData?.usage?.total_tokens ??
-      (openaiData?.usage?.completion_tokens ?? 0) + (openaiData?.usage?.prompt_tokens ?? 0)
+      usage?.total_tokens ??
+      ((usage?.output_tokens ?? 0) + (usage?.input_tokens ?? 0))
     const costEstimate = (tokensUsed / 1_000_000) * 0.45
 
-    // debita crédito (se não for admin)
+    // Débito de crédito (não-admin)
     if (!isAdmin) {
       const { error: updateError } = await supabase
         .from("users")
         .update({ credits: userData.credits - 1 })
         .eq("id", user.id)
-
       if (updateError) {
         console.error("[caption] credit update error:", updateError)
         throw new Error("Erro ao processar créditos")
       }
     }
 
-    // salva primeiro resultado (se houver)
+    // Persistência (primeiro item)
     try {
       const first = results[0] || { caption: "", hashtags: [], cta: "" }
       await supabase.from("posts").insert({
@@ -164,7 +218,7 @@ export async function POST(request: Request) {
       // não bloqueia a resposta
     }
 
-    // log de uso
+    // Log de uso
     await supabase.from("usage_logs").insert({
       user_id: user.id,
       action: "generate_caption",

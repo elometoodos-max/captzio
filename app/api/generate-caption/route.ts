@@ -36,23 +36,18 @@ const MODEL = () => config.openai.models.caption // ex.: "gpt-5-nano"
 function clamp(n: number, min: number, max: number) {
   return Math.min(Math.max(n, min), max)
 }
-
 function toErrorMessage(e: unknown): string {
   if (e instanceof Error) return e.message
   try { return JSON.stringify(e) } catch { return String(e) }
 }
-
 async function safeJson(res: Response) {
   try { return await res.json() } catch { return null }
 }
-
 function sleep(ms: number) { return new Promise((r) => setTimeout(r, ms)) }
-
 function stripCodeFences(s: string): string {
   const m = s.match(/```json\s*([\s\S]*?)```/i) || s.match(/```\s*([\s\S]*?)```/i)
   return m ? m[1].trim() : s.trim()
 }
-
 function extractResponseText(resp: any): string | undefined {
   const t1 = resp?.output_text
   if (typeof t1 === "string" && t1.trim()) return t1.trim()
@@ -69,7 +64,6 @@ function extractResponseText(resp: any): string | undefined {
   }
   return undefined
 }
-
 function isValidCaptionArray(arr: any): arr is CaptionResult[] {
   if (!Array.isArray(arr) || arr.length < 1) return false
   return arr.every((item) =>
@@ -104,7 +98,6 @@ async function callOpenAIWithRetries(payload: any, opts?: { retries?: number; ti
       clearTimeout(timer)
 
       if (res.ok) return res.json()
-
       if (res.status === 429 || (res.status >= 500 && res.status <= 599)) {
         lastErr = await safeJson(res)
         const backoff = 500 * Math.pow(2, attempt)
@@ -181,13 +174,13 @@ export async function POST(request: Request) {
       `Cada legenda deve ter: 1–3 emojis, 1 linha de CTA e 5 hashtags relevantes.\n` +
       `Responda APENAS um JSON com a propriedade "results" contendo um array de objetos { "caption": string, "cta": string, "hashtags": string[] }.`
 
-    // ✅ Responses API — text.format como OBJETO
+    // ✅ Responses API — text.format como OBJETO com type aceito
     const payload = {
       model: MODEL(),
       instructions: "Responda exclusivamente com JSON válido.",
       input: [{ role: "user", content: userPrompt }],
       max_output_tokens: 1000,
-      text: { format: { type: "json" } }, // <-- aqui está o fix
+      text: { format: { type: "json_object" } }, // <- 'json_object' é aceito
     }
 
     const ai = await callOpenAIWithRetries(payload, { retries: 2, timeoutMs: 25_000 })

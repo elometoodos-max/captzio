@@ -38,7 +38,6 @@ const MODEL = () => config.openai.models.caption // ex.: "gpt-5-nano"
 
 // ===== Utils =====
 function extractResponseText(resp: any): string | undefined {
-  // Formatos comuns da Responses API
   const t1 = resp?.output_text
   if (typeof t1 === "string" && t1.trim()) return t1.trim()
 
@@ -57,10 +56,17 @@ function extractResponseText(resp: any): string | undefined {
   return undefined
 }
 
+function stripCodeFences(s: string): string {
+  const m =
+    s.match(/```json\s*([\s\S]*?)```/i) ||
+    s.match(/```\s*([\s\S]*?)```/i)
+  return m ? m[1].trim() : s.trim()
+}
+
 function isValidCaptionArray(arr: any): arr is CaptionResult[] {
   if (!Array.isArray(arr) || arr.length < 1) return false
   return arr.every((item) => {
-    const ok =
+    return (
       item &&
       typeof item.caption === "string" &&
       item.caption.trim().length > 0 &&
@@ -70,7 +76,7 @@ function isValidCaptionArray(arr: any): arr is CaptionResult[] {
       item.hashtags.length >= 3 &&
       item.hashtags.length <= 10 &&
       item.hashtags.every((h: any) => typeof h === "string" && h.trim().length > 0)
-    return ok
+    )
   })
 }
 
@@ -85,6 +91,18 @@ function toErrorMessage(e: unknown): string {
   } catch {
     return String(e)
   }
+}
+
+async function safeJson(res: Response) {
+  try {
+    return await res.json()
+  } catch {
+    return null
+  }
+}
+
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms))
 }
 
 // ===== OpenAI call com timeout + retries =====
@@ -108,11 +126,8 @@ async function callOpenAIWithRetries(payload: OpenAIJson, opts?: { retries?: num
       })
       clearTimeout(timer)
 
-      if (res.ok) {
-        return res.json()
-      }
+      if (res.ok) return res.json()
 
-      // Trata 429/5xx com retry exponencial
       if (res.status === 429 || (res.status >= 500 && res.status <= 599)) {
         lastErr = await safeJson(res)
         const backoff = 500 * Math.pow(2, attempt)
@@ -120,12 +135,10 @@ async function callOpenAIWithRetries(payload: OpenAIJson, opts?: { retries?: num
         continue
       }
 
-      // Erros 4xx/fora do retry
       const body = await safeJson(res)
       throw new Error(body?.error?.message || `OpenAI HTTP ${res.status}`)
     } catch (err: any) {
       clearTimeout(timer)
-      // AbortError / rede / timeout: tenta novamente
       if (attempt < retries) {
         const backoff = 500 * Math.pow(2, attempt)
         await sleep(backoff)
@@ -135,20 +148,7 @@ async function callOpenAIWithRetries(payload: OpenAIJson, opts?: { retries?: num
       throw err
     }
   }
-  // Se saiu do loop sem sucesso
   throw new Error(toErrorMessage(lastErr) || "Falha ao chamar OpenAI após retries")
-}
-
-function sleep(ms: number) {
-  return new Promise((r) => setTimeout(r, ms))
-}
-
-async function safeJson(res: Response) {
-  try {
-    return await res.json()
-  } catch {
-    return null
-  }
 }
 
 // ===== Handler =====
@@ -203,50 +203,24 @@ export async function POST(request: Request) {
       `Plataforma: ${platform || "Instagram"}.\n` +
       `Objetivo: ${sanitizedGoal || "engajamento e conversão"}.\n` +
       `Cada legenda deve ter: 1–3 emojis, 1 linha de CTA e 5 hashtags relevantes.\n` +
-      `Responda APENAS no formato do schema fornecido.`
+      `Responda APENAS um JSON com a propriedade "results" contendo um array de objetos no formato { "caption": string, "cta": string, "hashtags": string[] }.`
 
-    // Payload da Responses API (sem temperature; usa text.format)
+    // Payload da Responses API — sem schema/response_format
     const payload: OpenAIJson = {
-      model: MODEL(),
-      instructions: "Responda exclusivamente com JSON válido conforme o schema.",
+      model: MODEL(),                              // ex.: "gpt-5-nano"
+      instructions: "Responda exclusivamente com JSON válido.",
       input: [{ role: "user", content: userPrompt }],
       max_output_tokens: 1000,
-      text: {
-        format: {
-          type: "json_schema",
-          name: "CaptionArray",
-          strict: true,
-          schema: {
-            type: "array",
-            minItems: 1,
-            maxItems: MAX_VARIATIONS,
-            items: {
-              type: "object",
-              additionalProperties: false,
-              required: ["caption", "cta", "hashtags"],
-              properties: {
-                caption: { type: "string", minLength: 1 },
-                cta: { type: "string", minLength: 1 },
-                hashtags: {
-                  type: "array",
-                  minItems: 3,
-                  maxItems: 10,
-                  items: { type: "string", pattern: "^#?\\w[\\w\\d_]*$" },
-                },
-              },
-            },
-          },
-        },
-      },
+      // Força saída como JSON, sem schema (evita o erro que você recebeu)
+      text: { format: "json" },
     }
 
     // Chamada com retry/timeout
     const ai = await callOpenAIWithRetries(payload, { retries: 2, timeoutMs: 25_000 })
 
     // Extrai texto
-    const text = extractResponseText(ai)
-    if (!text) {
-      // Se o modelo devolveu algo fora do esperado, loga bruto p/ debug
+    const raw = extractResponseText(ai)
+    if (!raw) {
       console.error("[caption] empty model output", ai)
       throw new Error("Resposta vazia da IA")
     }
@@ -254,13 +228,15 @@ export async function POST(request: Request) {
     // Parse + validação de estrutura
     let results: CaptionResult[]
     try {
-      const parsed = JSON.parse(text)
-      results = Array.isArray(parsed) ? parsed : [parsed]
-      if (!isValidCaptionArray(results)) {
-        throw new Error("JSON não corresponde ao schema esperado")
+      const text = stripCodeFences(raw)
+      const parsed = JSON.parse(text) as { results?: unknown }
+      const arr = (parsed && (parsed as any).results) ?? null
+      if (!isValidCaptionArray(arr)) {
+        throw new Error("JSON não corresponde ao formato esperado (object.results[])")
       }
+      results = arr as CaptionResult[]
     } catch (e) {
-      console.error("[caption] JSON parse/shape error", { text, error: toErrorMessage(e) })
+      console.error("[caption] JSON parse/shape error", { raw, error: toErrorMessage(e) })
       throw new Error("Erro ao processar resposta da IA (JSON inválido)")
     }
 
@@ -286,7 +262,7 @@ export async function POST(request: Request) {
       creditsRemaining = newCredits
     }
 
-    // Persiste o primeiro resultado (se existir)
+    // Persiste o primeiro resultado
     try {
       const first = results[0]
       if (first) {
@@ -302,7 +278,6 @@ export async function POST(request: Request) {
       }
     } catch (saveError) {
       console.error("[caption] save error:", saveError)
-      // não bloqueia a resposta
     }
 
     // Log de uso

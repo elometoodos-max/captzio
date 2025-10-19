@@ -1,3 +1,4 @@
+// app/dashboard/generate-image/page.tsx
 "use client"
 
 import { type FormEvent, useEffect, useRef, useState } from "react"
@@ -39,44 +40,31 @@ export default function GenerateImagePage() {
   const [imageJob, setImageJob] = useState<ImageJob | null>(null)
 
   const pollRef = useRef<number | null>(null)
-
   const creditCost = getCreditCost(quality, size)
 
   useEffect(() => {
     if (!jobId) return
-
-    if (pollRef.current) {
-      clearInterval(pollRef.current)
-      pollRef.current = null
-    }
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
 
     const poll = async () => {
       try {
         const response = await fetch(`/api/image-job/${jobId}`)
+        const text = await response.text()
+        let data: any = {}
+        try { data = text ? JSON.parse(text) : {} } catch {}
         if (!response.ok) {
-          const text = await response.text().catch(() => "Erro ao checar status do job")
-          throw new Error(text || "Erro ao checar status do job")
+          throw new Error((data && data.error) || text || "Erro ao checar status do job")
         }
-
-        const data = await response.json()
-
         if (data?.job) {
           setImageJob(data.job)
-
           if (data.job.status === "completed" || data.job.status === "failed") {
-            if (pollRef.current) {
-              clearInterval(pollRef.current)
-              pollRef.current = null
-            }
+            if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
             setIsLoading(false)
           }
         }
       } catch (err) {
         console.error("[v0] Failed to poll job status:", err)
-        if (pollRef.current) {
-          clearInterval(pollRef.current)
-          pollRef.current = null
-        }
+        if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
         setError(err instanceof Error ? err.message : "Erro ao checar status")
         setIsLoading(false)
       }
@@ -85,33 +73,16 @@ export default function GenerateImagePage() {
     poll()
     pollRef.current = window.setInterval(poll, 2000)
 
-    return () => {
-      if (pollRef.current) {
-        clearInterval(pollRef.current)
-        pollRef.current = null
-      }
-    }
+    return () => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null } }
   }, [jobId])
 
   const handleGenerate = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
 
     const trimmedPrompt = prompt.trim()
-
-    if (!trimmedPrompt) {
-      setError("Por favor, escreva a descrição da imagem (prompt).")
-      return
-    }
-
-    if (trimmedPrompt.length < 10) {
-      setError("Descrição muito curta. Mínimo 10 caracteres.")
-      return
-    }
-
-    if (trimmedPrompt.length > 1000) {
-      setError("Descrição muito longa. Máximo 1000 caracteres.")
-      return
-    }
+    if (!trimmedPrompt) { setError("Por favor, escreva a descrição da imagem (prompt)."); return }
+    if (trimmedPrompt.length < 10) { setError("Descrição muito curta. Mínimo 10 caracteres."); return }
+    if (trimmedPrompt.length > 1000) { setError("Descrição muito longa. Máximo 1000 caracteres."); return }
 
     setIsLoading(true)
     setError(null)
@@ -122,18 +93,16 @@ export default function GenerateImagePage() {
       const response = await fetch("/api/generate-image", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          prompt: trimmedPrompt,
-          style,
-          quality,
-          size,
-        }),
+        body: JSON.stringify({ prompt: trimmedPrompt, style, quality, size }),
       })
 
-      const data = await response.json()
+      const text = await response.text()
+      let data: any = {}
+      try { data = text ? JSON.parse(text) : {} } catch {}
 
       if (!response.ok) {
-        throw new Error(data.error || "Erro ao gerar imagem")
+        const msg = (data && data.error) ? data.error : (text || `HTTP ${response.status}`)
+        throw new Error(msg)
       }
 
       if (data.jobId) {
@@ -150,16 +119,12 @@ export default function GenerateImagePage() {
 
   const handleDownload = async (imageUrl: string) => {
     try {
-      const response = await fetch(imageUrl)
-      if (!response.ok) throw new Error("Falha ao baixar imagem")
-      const blob = await response.blob()
-      const url = window.URL.createObjectURL(blob)
+      // funciona para data URL e http(s)
       const a = document.createElement("a")
-      a.href = url
+      a.href = imageUrl
       a.download = `captzio-${Date.now()}.png`
       document.body.appendChild(a)
       a.click()
-      window.URL.revokeObjectURL(url)
       document.body.removeChild(a)
     } catch (err) {
       console.error("[v0] Failed to download image:", err)
@@ -275,8 +240,7 @@ export default function GenerateImagePage() {
                             <div className="flex items-center justify-between w-full">
                               <span>Padrão</span>
                               <span className="ml-4 text-xs text-muted-foreground">
-                                {getCreditCost("standard", size)} crédito
-                                {getCreditCost("standard", size) > 1 ? "s" : ""}
+                                {getCreditCost("standard", size)} crédito{getCreditCost("standard", size) > 1 ? "s" : ""}
                               </span>
                             </div>
                           </SelectItem>
@@ -376,11 +340,7 @@ export default function GenerateImagePage() {
                           </Button>
                           <Button
                             variant="outline"
-                            onClick={() => {
-                              setJobId(null)
-                              setImageJob(null)
-                              setError(null)
-                            }}
+                            onClick={() => { setJobId(null); setImageJob(null); setError(null) }}
                             className="w-full"
                           >
                             <RefreshCw className="mr-2 h-4 w-4" />
@@ -401,11 +361,7 @@ export default function GenerateImagePage() {
                         </p>
                         <Button
                           variant="outline"
-                          onClick={() => {
-                            setJobId(null)
-                            setImageJob(null)
-                            setError(null)
-                          }}
+                          onClick={() => { setJobId(null); setImageJob(null); setError(null) }}
                           className="mt-4"
                         >
                           Tentar Novamente

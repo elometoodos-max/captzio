@@ -82,8 +82,21 @@ export default function GenerateImagePage() {
 
   const handleGenerate = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
-    if (!prompt.trim()) {
-      setError("Por favor escreva a descrição da imagem (prompt).")
+
+    const trimmedPrompt = prompt.trim()
+
+    if (!trimmedPrompt) {
+      setError("Por favor, escreva a descrição da imagem (prompt).")
+      return
+    }
+
+    if (trimmedPrompt.length < 10) {
+      setError("Descrição muito curta. Mínimo 10 caracteres.")
+      return
+    }
+
+    if (trimmedPrompt.length > 1000) {
+      setError("Descrição muito longa. Máximo 1000 caracteres.")
       return
     }
 
@@ -97,9 +110,9 @@ export default function GenerateImagePage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          prompt: prompt.trim(),
+          prompt: trimmedPrompt,
           style,
-          quality, // Send quality as-is (standard or hd)
+          quality,
         }),
       })
 
@@ -111,18 +124,11 @@ export default function GenerateImagePage() {
 
       if (data.jobId) {
         setJobId(data.jobId)
-      } else if (data.imageBase64) {
-        setImageJob({
-          id: "sync",
-          status: "completed",
-          image_url: `data:image/png;base64,${data.imageBase64}`,
-          error_message: null,
-        })
-        setIsLoading(false)
       } else {
         throw new Error("Resposta inesperada do servidor")
       }
     } catch (err) {
+      console.error("[v0] Error generating image:", err)
       setError(err instanceof Error ? err.message : "Erro ao gerar imagem")
       setIsLoading(false)
     }
@@ -194,9 +200,10 @@ export default function GenerateImagePage() {
                         required
                         rows={6}
                         disabled={isLoading}
+                        maxLength={1000}
                       />
                       <p className="text-xs text-muted-foreground">
-                        Seja específico sobre cores, estilo, composição e elementos desejados
+                        {prompt.length}/1000 caracteres - Seja específico sobre cores, estilo, composição e elementos
                       </p>
                     </div>
 

@@ -2,9 +2,9 @@ export const config = {
   openai: {
     apiKey:
       process.env.OPENAI_API_KEY ||
-      "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",
+      "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",
     models: {
-      caption: "gpt-5-nano",
+      caption: "gpt-5-nano", // Fastest and cheapest GPT-5 model
       image: "gpt-image-1",
     },
     get imageModel() {
@@ -29,5 +29,8 @@ export const config = {
 } as const
 
 if (!config.openai.apiKey || config.openai.apiKey.length < 20) {
-  console.error("[v0] WARNING: OpenAI API key is not properly configured!")
+  console.error("[v0] ERRO CRÍTICO: Chave da API OpenAI não está configurada corretamente!")
+  console.error("[v0] Configure a variável de ambiente OPENAI_API_KEY")
+} else {
+  console.log("[v0] OpenAI API key configurada com sucesso")
 }

@@ -91,9 +91,11 @@ Regras importantes:
       "Você é um especialista em marketing digital e copywriting para redes sociais brasileiras. Retorne apenas JSON válido, sem markdown ou explicações. Seja criativo e engajante.",
     input: prompt,
     max_output_tokens: MAX_OUTPUT_TOKENS,
+    store: false, // Don't store responses to save costs
+    temperature: 0.8, // Slightly creative but consistent
   }
 
-  console.log("[v0] Chamando OpenAI Responses API com modelo:", MODEL, "reasoning: minimal, verbosity: low")
+  console.log("[v0] Chamando OpenAI Responses API com modelo:", MODEL)
 
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 30000) // 30s timeout

@@ -20,6 +20,7 @@ export default function GenerateImagePage() {
   const [prompt, setPrompt] = useState("")
   const [style, setStyle] = useState("natural")
   const [quality, setQuality] = useState("standard")
+  const [size, setSize] = useState("1024x1024")
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [jobId, setJobId] = useState<string | null>(null)
@@ -27,11 +28,9 @@ export default function GenerateImagePage() {
 
   const pollRef = useRef<number | null>(null)
 
-  // Poll for job status
   useEffect(() => {
     if (!jobId) return
 
-    // clear any previous interval
     if (pollRef.current) {
       clearInterval(pollRef.current)
       pollRef.current = null
@@ -113,6 +112,7 @@ export default function GenerateImagePage() {
           prompt: trimmedPrompt,
           style,
           quality,
+          size,
         }),
       })
 
@@ -214,8 +214,8 @@ export default function GenerateImagePage() {
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="natural">Natural</SelectItem>
-                          <SelectItem value="vivid">Vibrante</SelectItem>
+                          <SelectItem value="natural">Natural (Realista)</SelectItem>
+                          <SelectItem value="vivid">Vibrante (Cores Intensas)</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -227,8 +227,27 @@ export default function GenerateImagePage() {
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="standard">Padrão (mais barato)</SelectItem>
-                          <SelectItem value="hd">Alta Definição (mais caro)</SelectItem>
+                          <SelectItem value="standard">Padrão (1 crédito)</SelectItem>
+                          <SelectItem value="hd">Alta Definição (17 créditos)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground">
+                        {quality === "standard"
+                          ? "Qualidade padrão, mais rápida e econômica"
+                          : "Máxima qualidade com detalhes refinados"}
+                      </p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="size">Tamanho</Label>
+                      <Select value={size} onValueChange={setSize} disabled={isLoading}>
+                        <SelectTrigger id="size">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="1024x1024">Quadrado (1024x1024)</SelectItem>
+                          <SelectItem value="1024x1536">Retrato (1024x1536)</SelectItem>
+                          <SelectItem value="1536x1024">Paisagem (1536x1024)</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>

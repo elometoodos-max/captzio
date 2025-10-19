@@ -4,15 +4,20 @@ import { config } from "@/lib/config"
 import { validateImageGeneration } from "@/lib/validation"
 import { handleApiError } from "@/lib/error-handler"
 
-const RESPONSES_ENDPOINT = "https://api.openai.com/v1/responses"
-const IMAGE_MODEL = "gpt-image-1" // GPT Image 1 for high-quality images
+const IMAGE_GENERATION_ENDPOINT = "https://api.openai.com/v1/images/generations"
+const IMAGE_MODEL = "gpt-image-1"
+
+const CREDIT_COSTS = {
+  low: { "1024x1024": 1, "1024x1536": 2, "1536x1024": 2 },
+  medium: { "1024x1024": 4, "1024x1536": 6, "1536x1024": 6 },
+  high: { "1024x1024": 17, "1024x1536": 25, "1536x1024": 25 },
+}
 
 export async function POST(request: NextRequest) {
   try {
     console.log("[v0] Image generation started")
     const supabase = await createClient()
 
-    // Get authenticated user
     const {
       data: { user },
       error: authError,
@@ -22,14 +27,20 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Não autenticado" }, { status: 401 })
     }
 
-    console.log("[v0] User authenticated:", user.id)
-
-    // Get request body
     const body = await request.json()
-    const { prompt, style = "natural", quality = "standard" } = body
+    const { prompt, style = "natural", quality: frontendQuality = "standard", size = "1024x1024" } = body
 
-    // Validate input
-    const validation = validateImageGeneration({ prompt, style, quality })
+    // Map frontend quality to API quality
+    const qualityMap: Record<string, "low" | "medium" | "high"> = {
+      standard: "low",
+      hd: "high",
+      low: "low",
+      medium: "medium",
+      high: "high",
+    }
+    const quality = qualityMap[frontendQuality] || "low"
+
+    const validation = validateImageGeneration({ prompt, style, quality, size })
     if (!validation.success) {
       return NextResponse.json({ error: validation.error }, { status: 400 })
     }
@@ -42,7 +53,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Descrição muito longa. Máximo 1000 caracteres." }, { status: 400 })
     }
 
-    // Get user data
     const { data: userData, error: userError } = await supabase
       .from("users")
       .select("credits, role, email")
@@ -53,19 +63,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Usuário não encontrado" }, { status: 404 })
     }
 
-    // Check if user is admin (free testing)
     const isAdmin = userData.role === "admin" || userData.email === config.admin.email
 
-    // Check credits (5 credits for image generation)
-    const requiredCredits = 5
+    const requiredCredits = CREDIT_COSTS[quality][size as keyof (typeof CREDIT_COSTS)[typeof quality]] || 1
+
     if (!isAdmin && userData.credits < requiredCredits) {
       return NextResponse.json(
-        { error: "Créditos insuficientes. Você precisa de 5 créditos para gerar uma imagem." },
+        {
+          error: `Créditos insuficientes. Você precisa de ${requiredCredits} créditos para gerar uma imagem ${quality} ${size}.`,
+        },
         { status: 402 },
       )
     }
 
-    // Reserve credits by creating a pending job
     const { data: jobData, error: jobError } = await supabase
       .from("images")
       .insert({
@@ -84,7 +94,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Erro ao criar job de imagem" }, { status: 500 })
     }
 
-    // Reserve credits immediately (will be refunded if generation fails)
     if (!isAdmin) {
       const { error: creditError } = await supabase
         .from("users")
@@ -93,7 +102,6 @@ export async function POST(request: NextRequest) {
 
       if (creditError) {
         console.error("[v0] Error reserving credits:", creditError)
-        // Rollback job creation
         await supabase.from("images").delete().eq("id", jobData.id)
         return NextResponse.json({ error: "Erro ao reservar créditos" }, { status: 500 })
       }
@@ -101,16 +109,18 @@ export async function POST(request: NextRequest) {
 
     console.log("[v0] Starting async image generation with GPT Image 1")
 
-    // Start async image generation
-    generateImageAsync(jobData.id, prompt.trim(), style, quality, user.id, isAdmin).catch((error) => {
-      console.error("[v0] Unhandled error in generateImageAsync:", error)
-    })
+    generateImageAsync(jobData.id, prompt.trim(), style, quality, size, user.id, isAdmin, requiredCredits).catch(
+      (error) => {
+        console.error("[v0] Unhandled error in generateImageAsync:", error)
+      },
+    )
 
     return NextResponse.json({
       success: true,
       jobId: jobData.id,
       message: "Geração de imagem iniciada",
       estimatedTime: "30-60 segundos",
+      creditsUsed: isAdmin ? 0 : requiredCredits,
     })
   } catch (error) {
     console.error("[v0] Image generation error:", error)
@@ -122,44 +132,42 @@ async function generateImageAsync(
   jobId: string,
   prompt: string,
   style: string,
-  quality: string,
+  quality: "low" | "medium" | "high",
+  size: string,
   userId: string,
   isAdmin: boolean,
+  creditsUsed: number,
 ) {
   try {
     console.log("[v0] Processing image generation for job:", jobId)
 
-    // Create a new Supabase client for this async operation
     const supabase = await createClient()
 
-    // Update status to processing
     await supabase.from("images").update({ status: "processing" }).eq("id", jobId)
 
-    console.log("[v0] Calling OpenAI Responses API with GPT Image 1")
+    console.log("[v0] Calling GPT Image 1 API with quality:", quality, "size:", size)
+
+    const enhancedPrompt = `${prompt}. High quality, professional, detailed.`
 
     const payload = {
       model: IMAGE_MODEL,
-      reasoning: {
-        effort: "low", // Low reasoning for image generation
-      },
-      instructions: `Generate a high-quality, professional image based on the user's description. 
-Style: ${style === "vivid" ? "vibrant, bold colors and dramatic composition" : "natural, realistic, and subtle"}
-Quality: ${quality === "hd" ? "ultra high definition with fine details" : "standard quality"}`,
-      input: prompt,
-      image: {
-        size: "1024x1024",
-        format: "png",
-      },
+      prompt: enhancedPrompt,
+      quality: quality,
+      size: size,
+      style: style === "vivid" ? "vivid" : "natural",
+      n: 1,
+      response_format: "url", // Get URL directly
     }
 
     const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 60000) // 60s timeout for images
+    const timeout = setTimeout(() => controller.abort(), 90000) // 90s timeout for images
 
-    const response = await fetch(RESPONSES_ENDPOINT, {
+    const response = await fetch(IMAGE_GENERATION_ENDPOINT, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${config.openai.apiKey}`,
+        "OpenAI-Organization": config.openai.organization || "", // Optional org header
       },
       body: JSON.stringify(payload),
       signal: controller.signal,
@@ -170,29 +178,24 @@ Quality: ${quality === "hd" ? "ultra high definition with fine details" : "stand
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}))
       console.error("[v0] OpenAI API error:", errorData)
-      throw new Error(errorData.error?.message || `HTTP ${response.status}: Erro ao gerar imagem`)
+
+      let errorMessage = errorData.error?.message || `HTTP ${response.status}: Erro ao gerar imagem`
+
+      if (response.status === 401) {
+        errorMessage = "Erro de autenticação com a API OpenAI. Verifique a chave da API."
+      } else if (response.status === 429) {
+        errorMessage = "Limite de requisições atingido. Tente novamente em alguns minutos."
+      } else if (response.status === 400) {
+        errorMessage = "Prompt inválido ou parâmetros incorretos."
+      }
+
+      throw new Error(errorMessage)
     }
 
     const data = await response.json()
     console.log("[v0] Response received from OpenAI")
 
-    // Extract image URL from response
-    let imageUrl: string | null = null
-
-    // Try to find image in output array
-    if (Array.isArray(data.output)) {
-      for (const item of data.output) {
-        if (item.type === "message" && Array.isArray(item.content)) {
-          for (const content of item.content) {
-            if (content.type === "output_image" && content.url) {
-              imageUrl = content.url
-              break
-            }
-          }
-        }
-        if (imageUrl) break
-      }
-    }
+    const imageUrl = data.data?.[0]?.url
 
     if (!imageUrl) {
       throw new Error("Nenhuma imagem foi gerada pela API")
@@ -200,25 +203,27 @@ Quality: ${quality === "hd" ? "ultra high definition with fine details" : "stand
 
     console.log("[v0] Image generated successfully")
 
-    // Update job with completed status
     await supabase
       .from("images")
       .update({
         status: "completed",
         image_url: imageUrl,
+        revised_prompt: data.data?.[0]?.revised_prompt || null, // Store revised prompt if available
       })
       .eq("id", jobId)
 
-    // Log usage
     await supabase.from("usage_logs").insert({
       user_id: userId,
       action: "generate_image",
-      credits_used: isAdmin ? 0 : 5,
+      credits_used: isAdmin ? 0 : creditsUsed,
+      cost_usd: 0, // Could calculate based on pricing
       metadata: {
         prompt,
         style,
         quality,
+        size,
         model: IMAGE_MODEL,
+        revised_prompt: data.data?.[0]?.revised_prompt,
       },
     })
 
@@ -228,10 +233,8 @@ Quality: ${quality === "hd" ? "ultra high definition with fine details" : "stand
 
     const errorMessage = error instanceof Error ? error.message : "Erro desconhecido ao gerar imagem"
 
-    // Create a new Supabase client for error handling
     const supabase = await createClient()
 
-    // Update job with failed status
     await supabase
       .from("images")
       .update({
@@ -240,14 +243,13 @@ Quality: ${quality === "hd" ? "ultra high definition with fine details" : "stand
       })
       .eq("id", jobId)
 
-    // Refund credits if not admin
     if (!isAdmin) {
       const { data: userData } = await supabase.from("users").select("credits").eq("id", userId).single()
 
       if (userData) {
         await supabase
           .from("users")
-          .update({ credits: userData.credits + 5 })
+          .update({ credits: userData.credits + creditsUsed })
           .eq("id", userId)
         console.log("[v0] Credits refunded for failed generation")
       }

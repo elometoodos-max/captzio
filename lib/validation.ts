@@ -82,9 +82,14 @@ export function validateImageRequest(data: any): ValidationResult {
     return { valid: false, error: "Estilo inválido" }
   }
 
-  // Accept both frontend values (standard, hd) and API values (low, medium, high)
-  if (!data.quality || !["standard", "hd", "low", "medium", "high"].includes(data.quality)) {
-    return { valid: false, error: "Qualidade inválida" }
+  const validQualities = ["standard", "hd", "low", "medium", "high"]
+  if (!data.quality || !validQualities.includes(data.quality)) {
+    return { valid: false, error: `Qualidade inválida. Opções válidas: ${validQualities.join(", ")}` }
+  }
+
+  const validSizes = ["1024x1024", "1024x1536", "1536x1024"]
+  if (data.size && !validSizes.includes(data.size)) {
+    return { valid: false, error: `Tamanho inválido. Opções válidas: ${validSizes.join(", ")}` }
   }
 
   return { valid: true }

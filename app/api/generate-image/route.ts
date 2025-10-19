@@ -5,15 +5,44 @@ import { config } from "@/lib/config"
 import { validateImageGeneration } from "@/lib/validation"
 import { handleApiError } from "@/lib/error-handler"
 
-// Garante ambiente Node.js (mantém o process rodando para o async)
 export const runtime = "nodejs"
 
 const IMAGE_GENERATION_ENDPOINT = "https://api.openai.com/v1/images/generations"
 const IMAGE_MODEL = "gpt-image-1" as const
 
+// --- Tipos ---
 type InternalQuality = "low" | "medium" | "high"
 type ApiQuality = "standard" | "hd"
+type ApiSize = "1024x1024" | "1024x1536" | "1536x1024"
+type ApiStyle = "natural" | "vivid"
 
+// --- Normalizadores (aceitam variações do seu UI em PT/labels bonitos) ---
+function normalizeStyle(input?: string): ApiStyle {
+  if (!input) return "natural"
+  const s = input.toLowerCase()
+  if (s.includes("vivid") || s.includes("vívido") || s.includes("vivo") || s.includes("vibrant") || s.includes("vibrante"))
+    return "vivid"
+  // "Natural (Realista)", "natural", etc. viram "natural"
+  return "natural"
+}
+
+function normalizeSize(input?: string): ApiSize {
+  if (!input) return "1024x1024"
+  const s = input.toLowerCase().trim()
+
+  // Mapas por rótulos comuns do UI
+  if (s.includes("1:1") || s.includes("quadrado") || s.includes("square")) return "1024x1024"
+  if (s.includes("vertical") || s.includes("retrato") || s.includes("portrait")) return "1024x1536"
+  if (s.includes("horizontal") || s.includes("paisagem") || s.includes("landscape")) return "1536x1024"
+
+  // Se já veio no formato correto:
+  if (s === "1024x1024" || s === "1024x1536" || s === "1536x1024") return s as ApiSize
+
+  // Qualquer outra coisa: fallback seguro
+  return "1024x1024"
+}
+
+// Front → qualidade interna (créditos)
 const frontendToInternal: Record<string, InternalQuality> = {
   standard: "low",
   hd: "high",
@@ -22,13 +51,15 @@ const frontendToInternal: Record<string, InternalQuality> = {
   high: "high",
 }
 
+// Interna → qualidade aceita pela API
 const internalToApi: Record<InternalQuality, ApiQuality> = {
   low: "standard",
   medium: "standard",
   high: "hd",
 }
 
-const CREDIT_COSTS: Record<InternalQuality, Record<"1024x1024" | "1024x1536" | "1536x1024", number>> = {
+// Custos por qualidade interna
+const CREDIT_COSTS: Record<InternalQuality, Record<ApiSize, number>> = {
   low: { "1024x1024": 1, "1024x1536": 2, "1536x1024": 2 },
   medium: { "1024x1024": 4, "1024x1536": 6, "1536x1024": 6 },
   high: { "1024x1024": 17, "1024x1536": 25, "1536x1024": 25 },
@@ -49,25 +80,30 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const {
-      prompt,
-      style = "natural",
-      quality: frontendQuality = "standard",
-      size = "1024x1024",
-    } = body
+    const rawPrompt = (body?.prompt ?? "") as string
+    const rawStyle = (body?.style ?? "natural") as string
+    const rawQuality = (body?.quality ?? "standard") as string
+    const rawSize = (body?.size ?? "1024x1024") as string
 
-    const internalQuality: InternalQuality = frontendToInternal[frontendQuality] || "low"
+    // --- Normalização ANTES de validar ---
+    const prompt = typeof rawPrompt === "string" ? rawPrompt.trim() : ""
+    const style = normalizeStyle(rawStyle)
+    const size = normalizeSize(rawSize)
+    const internalQuality: InternalQuality = frontendToInternal[rawQuality] || "low"
 
+    console.log("[v0] Raw inputs:", { rawPrompt, rawStyle, rawQuality, rawSize })
+    console.log("[v0] Normalized inputs:", { prompt, style, size, internalQuality })
+
+    // --- Validação já com valores normalizados ---
     const validation = validateImageGeneration({ prompt, style, quality: internalQuality, size })
     if (!validation.success) {
       return NextResponse.json({ error: validation.error }, { status: 400 })
     }
 
-    if (!prompt || typeof prompt !== "string" || prompt.trim().length < 10) {
+    if (!prompt || prompt.length < 10) {
       return NextResponse.json({ error: "Descrição muito curta. Mínimo 10 caracteres." }, { status: 400 })
     }
-
-    if (prompt.trim().length > 1000) {
+    if (prompt.length > 1000) {
       return NextResponse.json({ error: "Descrição muito longa. Máximo 1000 caracteres." }, { status: 400 })
     }
 
@@ -82,30 +118,23 @@ export async function POST(request: NextRequest) {
     }
 
     const isAdmin = userData.role === "admin" || userData.email === config.admin.email
-
-    const sizeKey = (["1024x1024", "1024x1536", "1536x1024"] as const).includes(size as any)
-      ? (size as "1024x1024" | "1024x1536" | "1536x1024")
-      : "1024x1024"
-
-    const requiredCredits =
-      CREDIT_COSTS[internalQuality][sizeKey as keyof (typeof CREDIT_COSTS)[typeof internalQuality]] || 1
+    const requiredCredits = CREDIT_COSTS[internalQuality][size] ?? 1
 
     if (!isAdmin && (userData.credits ?? 0) < requiredCredits) {
       return NextResponse.json(
-        {
-          error: `Créditos insuficientes. Você precisa de ${requiredCredits} créditos para gerar uma imagem ${internalQuality} ${sizeKey}.`,
-        },
+        { error: `Créditos insuficientes. Você precisa de ${requiredCredits} créditos para gerar uma imagem ${internalQuality} ${size}.` },
         { status: 402 },
       )
     }
 
+    // Cria job
     const { data: jobData, error: jobError } = await supabase
       .from("images")
       .insert({
         user_id: user.id,
-        prompt: prompt.trim(),
-        style,
-        quality: internalQuality,
+        prompt,
+        style,                // já normalizado ("natural"/"vivid")
+        quality: internalQuality, // guarda interno
         status: "pending",
         credits_used: isAdmin ? 0 : requiredCredits,
       })
@@ -117,6 +146,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Erro ao criar job de imagem" }, { status: 500 })
     }
 
+    // Reserva créditos
     if (!isAdmin) {
       const { error: creditError } = await supabase
         .from("users")
@@ -132,16 +162,8 @@ export async function POST(request: NextRequest) {
 
     console.log("[v0] Starting async image generation with GPT Image 1")
 
-    generateImageAsync(
-      jobData.id,
-      prompt.trim(),
-      style,
-      internalQuality,
-      sizeKey,
-      user.id,
-      isAdmin,
-      requiredCredits,
-    ).catch((error) => {
+    // Processamento assíncrono
+    generateImageAsync(jobData.id, prompt, style, internalQuality, size, user.id, isAdmin, requiredCredits).catch((error) => {
       console.error("[v0] Unhandled error in generateImageAsync:", error)
     })
 
@@ -160,17 +182,17 @@ export async function POST(request: NextRequest) {
 async function generateImageAsync(
   jobId: string,
   prompt: string,
-  style: string,
+  style: ApiStyle,
   internalQuality: InternalQuality,
-  size: "1024x1024" | "1024x1536" | "1536x1024",
+  size: ApiSize,
   userId: string,
   isAdmin: boolean,
   creditsUsed: number,
 ) {
   try {
     console.log("[v0] Processing image generation for job:", jobId)
-
     const supabase = await createClient()
+
     await supabase.from("images").update({ status: "processing" }).eq("id", jobId)
 
     const apiQuality: ApiQuality = internalToApi[internalQuality]
@@ -178,9 +200,9 @@ async function generateImageAsync(
     const payload = {
       model: IMAGE_MODEL,
       prompt,
-      style: style === "vivid" ? "vivid" : "natural",
-      quality: apiQuality,
-      size,
+      style,          // "natural" | "vivid"
+      quality: apiQuality, // "standard" | "hd"
+      size,           // "1024x1024" | "1024x1536" | "1536x1024"
       n: 1,
     }
 
@@ -206,23 +228,18 @@ async function generateImageAsync(
       console.error("[v0] OpenAI API error response:", JSON.stringify(errorData, null, 2))
       console.error("[v0] Status code:", response.status)
 
-      let errorMessage = errorData.error?.message || `HTTP ${response.status}: Erro ao gerar imagem`
+      let msg = errorData?.error?.message || `HTTP ${response.status}: Erro ao gerar imagem`
+      if (response.status === 401) msg = "Erro de autenticação com a API OpenAI. Verifique a chave da API."
+      else if (response.status === 429) msg = "Limite de requisições atingido. Tente novamente em alguns minutos."
+      else if (response.status === 400) msg = `Parâmetros inválidos: ${errorData?.error?.message || "Verifique prompt, size, quality ou style"}`
 
-      if (response.status === 401) {
-        errorMessage = "Erro de autenticação com a API OpenAI. Verifique a chave da API."
-      } else if (response.status === 429) {
-        errorMessage = "Limite de requisições atingido. Tente novamente em alguns minutos."
-      } else if (response.status === 400) {
-        errorMessage = `Parâmetros inválidos: ${errorData.error?.message || "Verifique o prompt e configurações"}`
-      }
-
-      throw new Error(errorMessage)
+      throw new Error(msg)
     }
 
     const data = await response.json()
     console.log("[v0] Response received from OpenAI successfully")
 
-    const imageBase64 = data.data?.[0]?.b64_json
+    const imageBase64: string | undefined = data?.data?.[0]?.b64_json
     if (!imageBase64) throw new Error("Nenhuma imagem foi gerada pela API")
 
     const imageDataUrl = `data:image/png;base64,${imageBase64}`
@@ -249,7 +266,6 @@ async function generateImageAsync(
     console.log("[v0] Image generation completed successfully for job:", jobId)
   } catch (error) {
     console.error("[v0] Image generation failed:", error)
-
     const errorMessage = error instanceof Error ? error.message : "Erro desconhecido ao gerar imagem"
 
     const supabase = await createClient()
@@ -265,10 +281,7 @@ async function generateImageAsync(
     if (!isAdmin) {
       const { data: userData } = await supabase.from("users").select("credits").eq("id", userId).single()
       if (userData) {
-        await supabase
-          .from("users")
-          .update({ credits: (userData.credits ?? 0) + creditsUsed })
-          .eq("id", userId)
+        await supabase.from("users").update({ credits: (userData.credits ?? 0) + creditsUsed }).eq("id", userId)
         console.log("[v0] Credits refunded for failed generation")
       }
     }

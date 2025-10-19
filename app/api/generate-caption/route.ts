@@ -92,7 +92,6 @@ Regras importantes:
     input: prompt,
     max_output_tokens: MAX_OUTPUT_TOKENS,
     store: false, // Don't store responses to save costs
-    temperature: 0.8, // Slightly creative but consistent
   }
 
   console.log("[v0] Chamando OpenAI Responses API com modelo:", MODEL)

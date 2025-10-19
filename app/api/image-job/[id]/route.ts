@@ -25,8 +25,8 @@ export async function GET(
       .eq("id", id)
       .eq("user_id", user.id)
       .single()
+
     if (jobError || !imageJob) return NextResponse.json({ error: "Job não encontrado" }, { status: 404 })
-    if (imageJob.user_id !== user.id) return NextResponse.json({ error: "Acesso negado" }, { status: 403 })
 
     return NextResponse.json({
       job: {

@@ -1,3 +1,5 @@
+-- 001_create_tables.sql (versão atualizada)
+
 -- Create users table (extends auth.users)
 create table if not exists public.users (
   id uuid primary key references auth.users(id) on delete cascade,
@@ -28,9 +30,12 @@ create table if not exists public.images (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.users(id) on delete cascade,
   prompt text not null,
-  image_url text not null,
+  style text not null default 'natural',
+  quality text not null default 'low',
+  revised_prompt text,
+  image_url text, -- agora opcional
   status text not null default 'pending' check (status in ('pending', 'processing', 'completed', 'failed')),
-  credits_used integer not null default 5,
+  credits_used integer not null default 0,
   error_message text,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null,
   completed_at timestamp with time zone
@@ -68,7 +73,7 @@ create table if not exists public.usage_logs (
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
--- Enable Row Level Security
+-- Enable Row Level Security (RLS)
 alter table public.users enable row level security;
 alter table public.posts enable row level security;
 alter table public.images enable row level security;
@@ -76,7 +81,7 @@ alter table public.transactions enable row level security;
 alter table public.system_config enable row level security;
 alter table public.usage_logs enable row level security;
 
--- Drop existing policies before creating to make script idempotent
+-- Drop existing policies to make script idempotent
 drop policy if exists "Users can view their own profile" on public.users;
 drop policy if exists "Users can update their own profile" on public.users;
 drop policy if exists "Users can view their own posts" on public.posts;
@@ -84,14 +89,16 @@ drop policy if exists "Users can insert their own posts" on public.posts;
 drop policy if exists "Users can delete their own posts" on public.posts;
 drop policy if exists "Users can view their own images" on public.images;
 drop policy if exists "Users can insert their own images" on public.images;
+drop policy if exists "Users can update their own images" on public.images;
 drop policy if exists "Users can delete their own images" on public.images;
 drop policy if exists "Users can view their own transactions" on public.transactions;
 drop policy if exists "Admins can view system config" on public.system_config;
 drop policy if exists "Admins can update system config" on public.system_config;
 drop policy if exists "Admins can view all usage logs" on public.usage_logs;
 drop policy if exists "Users can view their own usage logs" on public.usage_logs;
+drop policy if exists "Users can insert their own usage logs" on public.usage_logs;
 
--- RLS Policies for users table
+-- RLS Policies for users
 create policy "Users can view their own profile"
   on public.users for select
   using (auth.uid() = id);
@@ -100,7 +107,7 @@ create policy "Users can update their own profile"
   on public.users for update
   using (auth.uid() = id);
 
--- RLS Policies for posts table
+-- RLS Policies for posts
 create policy "Users can view their own posts"
   on public.posts for select
   using (auth.uid() = user_id);
@@ -113,7 +120,7 @@ create policy "Users can delete their own posts"
   on public.posts for delete
   using (auth.uid() = user_id);
 
--- RLS Policies for images table
+-- RLS Policies for images
 create policy "Users can view their own images"
   on public.images for select
   using (auth.uid() = user_id);
@@ -122,11 +129,17 @@ create policy "Users can insert their own images"
   on public.images for insert
   with check (auth.uid() = user_id);
 
+create policy "Users can update their own images"
+  on public.images for update
+  to authenticated
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
 create policy "Users can delete their own images"
   on public.images for delete
   using (auth.uid() = user_id);
 
--- RLS Policies for transactions table
+-- RLS Policies for transactions
 create policy "Users can view their own transactions"
   on public.transactions for select
   using (auth.uid() = user_id);
@@ -150,7 +163,7 @@ create policy "Admins can update system config"
     )
   );
 
--- RLS Policies for usage_logs (admin only)
+-- RLS Policies for usage_logs
 create policy "Admins can view all usage logs"
   on public.usage_logs for select
   using (
@@ -163,3 +176,8 @@ create policy "Admins can view all usage logs"
 create policy "Users can view their own usage logs"
   on public.usage_logs for select
   using (auth.uid() = user_id);
+
+create policy "Users can insert their own usage logs"
+  on public.usage_logs for insert
+  to authenticated
+  with check (auth.uid() = user_id);

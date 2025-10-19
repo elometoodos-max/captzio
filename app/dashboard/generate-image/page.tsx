@@ -72,22 +72,17 @@ export default function GenerateImagePage() {
 
     poll()
     pollRef.current = window.setInterval(poll, 2000)
-
     return () => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null } }
   }, [jobId])
 
   const handleGenerate = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
-
     const trimmedPrompt = prompt.trim()
-    if (!trimmedPrompt) { setError("Por favor, escreva a descrição da imagem (prompt)."); return }
-    if (trimmedPrompt.length < 10) { setError("Descrição muito curta. Mínimo 10 caracteres."); return }
-    if (trimmedPrompt.length > 1000) { setError("Descrição muito longa. Máximo 1000 caracteres."); return }
+    if (!trimmedPrompt) return setError("Por favor, escreva a descrição da imagem (prompt).")
+    if (trimmedPrompt.length < 10) return setError("Descrição muito curta. Mínimo 10 caracteres.")
+    if (trimmedPrompt.length > 1000) return setError("Descrição muito longa. Máximo 1000 caracteres.")
 
-    setIsLoading(true)
-    setError(null)
-    setJobId(null)
-    setImageJob(null)
+    setIsLoading(true); setError(null); setJobId(null); setImageJob(null)
 
     try {
       const response = await fetch("/api/generate-image", {
@@ -95,21 +90,15 @@ export default function GenerateImagePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt: trimmedPrompt, style, quality, size }),
       })
-
       const text = await response.text()
       let data: any = {}
       try { data = text ? JSON.parse(text) : {} } catch {}
-
       if (!response.ok) {
         const msg = (data && data.error) ? data.error : (text || `HTTP ${response.status}`)
         throw new Error(msg)
       }
-
-      if (data.jobId) {
-        setJobId(data.jobId)
-      } else {
-        throw new Error("Resposta inesperada do servidor")
-      }
+      if (data.jobId) setJobId(data.jobId)
+      else throw new Error("Resposta inesperada do servidor")
     } catch (err) {
       console.error("[v0] Error generating image:", err)
       setError(err instanceof Error ? err.message : "Erro ao gerar imagem")
@@ -119,9 +108,8 @@ export default function GenerateImagePage() {
 
   const handleDownload = async (imageUrl: string) => {
     try {
-      // funciona para data URL e http(s)
       const a = document.createElement("a")
-      a.href = imageUrl
+      a.href = imageUrl // funciona com data: e http(s)
       a.download = `captzio-${Date.now()}.png`
       document.body.appendChild(a)
       a.click()
@@ -168,8 +156,7 @@ export default function GenerateImagePage() {
             <Alert className="mb-6">
               <Info className="h-4 w-4" />
               <AlertDescription>
-                <strong>GPT Image 1</strong> é o modelo mais avançado da OpenAI para geração de imagens. Ele entende
-                contexto, cria composições complexas e produz resultados fotorrealistas de alta qualidade.
+                <strong>GPT Image 1</strong> é o modelo mais avançado da OpenAI para geração de imagens.
               </AlertDescription>
             </Alert>
 
@@ -185,7 +172,7 @@ export default function GenerateImagePage() {
                       <Label htmlFor="prompt">Descrição da Imagem *</Label>
                       <Textarea
                         id="prompt"
-                        placeholder="Ex: Uma foto profissional de produtos de beleza em um fundo minimalista branco com iluminação suave e sombras delicadas. Composição elegante com foco nos detalhes dos produtos."
+                        placeholder="Ex: Uma foto profissional de produtos de beleza..."
                         value={prompt}
                         onChange={(e) => setPrompt(e.target.value)}
                         required
@@ -204,9 +191,7 @@ export default function GenerateImagePage() {
                       <div className="space-y-2">
                         <Label htmlFor="style">Estilo Visual</Label>
                         <Select value={style} onValueChange={setStyle} disabled={isLoading}>
-                          <SelectTrigger id="style">
-                            <SelectValue />
-                          </SelectTrigger>
+                          <SelectTrigger id="style"><SelectValue /></SelectTrigger>
                           <SelectContent>
                             <SelectItem value="natural">🎨 Natural (Realista)</SelectItem>
                             <SelectItem value="vivid">✨ Vibrante (Cores Intensas)</SelectItem>
@@ -217,9 +202,7 @@ export default function GenerateImagePage() {
                       <div className="space-y-2">
                         <Label htmlFor="size">Tamanho</Label>
                         <Select value={size} onValueChange={setSize} disabled={isLoading}>
-                          <SelectTrigger id="size">
-                            <SelectValue />
-                          </SelectTrigger>
+                          <SelectTrigger id="size"><SelectValue /></SelectTrigger>
                           <SelectContent>
                             <SelectItem value="1024x1024">⬜ Quadrado (1:1)</SelectItem>
                             <SelectItem value="1024x1536">📱 Retrato (2:3)</SelectItem>
@@ -232,9 +215,7 @@ export default function GenerateImagePage() {
                     <div className="space-y-2">
                       <Label htmlFor="quality">Qualidade da Imagem</Label>
                       <Select value={quality} onValueChange={setQuality} disabled={isLoading}>
-                        <SelectTrigger id="quality">
-                          <SelectValue />
-                        </SelectTrigger>
+                        <SelectTrigger id="quality"><SelectValue /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="standard">
                             <div className="flex items-center justify-between w-full">
@@ -262,17 +243,10 @@ export default function GenerateImagePage() {
                           </SelectItem>
                         </SelectContent>
                       </Select>
-                      <p className="text-xs text-muted-foreground">
-                        {quality === "standard" && "Boa qualidade, rápida e econômica"}
-                        {quality === "medium" && "Qualidade superior com mais detalhes"}
-                        {quality === "hd" && "Máxima qualidade com detalhes ultra refinados"}
-                      </p>
                     </div>
 
                     {error && (
-                      <Alert variant="destructive">
-                        <AlertDescription>{error}</AlertDescription>
-                      </Alert>
+                      <Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert>
                     )}
 
                     <Button type="submit" className="w-full" size="lg" disabled={isLoading}>
@@ -325,14 +299,6 @@ export default function GenerateImagePage() {
                         <div className="relative overflow-hidden rounded-lg border-2 border-border">
                           <img src={imageJob.image_url || "/placeholder.svg"} alt="Imagem gerada" className="w-full" />
                         </div>
-                        {imageJob.revised_prompt && (
-                          <Alert>
-                            <Info className="h-4 w-4" />
-                            <AlertDescription className="text-xs">
-                              <strong>Prompt otimizado pela IA:</strong> {imageJob.revised_prompt}
-                            </AlertDescription>
-                          </Alert>
-                        )}
                         <div className="grid gap-2 sm:grid-cols-2">
                           <Button onClick={() => handleDownload(imageJob.image_url!)} className="w-full">
                             <Download className="mr-2 h-4 w-4" />

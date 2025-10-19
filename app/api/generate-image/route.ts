@@ -152,11 +152,9 @@ async function generateImageAsync(
     const payload = {
       model: IMAGE_MODEL,
       prompt: enhancedPrompt,
-      quality: quality,
-      size: size,
-      style: style === "vivid" ? "vivid" : "natural",
+      quality: quality, // low, medium, or high
+      size: size, // 1024x1024, 1024x1536, or 1536x1024
       n: 1,
-      response_format: "url", // Get URL directly
     }
 
     const controller = new AbortController()
@@ -167,7 +165,6 @@ async function generateImageAsync(
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${config.openai.apiKey}`,
-        "OpenAI-Organization": config.openai.organization || "", // Optional org header
       },
       body: JSON.stringify(payload),
       signal: controller.signal,
@@ -195,20 +192,22 @@ async function generateImageAsync(
     const data = await response.json()
     console.log("[v0] Response received from OpenAI")
 
-    const imageUrl = data.data?.[0]?.url
+    const imageBase64 = data.data?.[0]?.b64_json
 
-    if (!imageUrl) {
+    if (!imageBase64) {
       throw new Error("Nenhuma imagem foi gerada pela API")
     }
 
-    console.log("[v0] Image generated successfully")
+    console.log("[v0] Image generated successfully, converting base64 to URL")
+
+    const imageDataUrl = `data:image/png;base64,${imageBase64}`
 
     await supabase
       .from("images")
       .update({
         status: "completed",
-        image_url: imageUrl,
-        revised_prompt: data.data?.[0]?.revised_prompt || null, // Store revised prompt if available
+        image_url: imageDataUrl, // Store as data URL
+        revised_prompt: null, // gpt-image-1 doesn't return revised_prompt
       })
       .eq("id", jobId)
 
@@ -216,14 +215,14 @@ async function generateImageAsync(
       user_id: userId,
       action: "generate_image",
       credits_used: isAdmin ? 0 : creditsUsed,
-      cost_usd: 0, // Could calculate based on pricing
+      cost_usd: 0,
       metadata: {
         prompt,
         style,
         quality,
         size,
         model: IMAGE_MODEL,
-        revised_prompt: data.data?.[0]?.revised_prompt,
+        usage: data.usage, // Include token usage from response
       },
     })
 

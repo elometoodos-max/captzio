@@ -147,15 +147,15 @@ async function generateImageAsync(
 
     console.log("[v0] Calling GPT Image 1 API with quality:", quality, "size:", size)
 
-    const enhancedPrompt = `${prompt}. High quality, professional, detailed.`
-
     const payload = {
       model: IMAGE_MODEL,
-      prompt: enhancedPrompt,
-      quality: quality, // low, medium, or high
+      prompt: prompt, // Use original prompt without modification
+      quality: quality, // low, medium, or high (NOT standard/hd)
       size: size, // 1024x1024, 1024x1536, or 1536x1024
       n: 1,
     }
+
+    console.log("[v0] Sending request to OpenAI with payload:", JSON.stringify(payload, null, 2))
 
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 90000) // 90s timeout for images
@@ -174,7 +174,8 @@ async function generateImageAsync(
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}))
-      console.error("[v0] OpenAI API error:", errorData)
+      console.error("[v0] OpenAI API error response:", JSON.stringify(errorData, null, 2))
+      console.error("[v0] Status code:", response.status)
 
       let errorMessage = errorData.error?.message || `HTTP ${response.status}: Erro ao gerar imagem`
 
@@ -183,22 +184,23 @@ async function generateImageAsync(
       } else if (response.status === 429) {
         errorMessage = "Limite de requisições atingido. Tente novamente em alguns minutos."
       } else if (response.status === 400) {
-        errorMessage = "Prompt inválido ou parâmetros incorretos."
+        errorMessage = `Parâmetros inválidos: ${errorData.error?.message || "Verifique o prompt e configurações"}`
       }
 
       throw new Error(errorMessage)
     }
 
     const data = await response.json()
-    console.log("[v0] Response received from OpenAI")
+    console.log("[v0] Response received from OpenAI successfully")
 
     const imageBase64 = data.data?.[0]?.b64_json
 
     if (!imageBase64) {
+      console.error("[v0] No image data in response:", JSON.stringify(data, null, 2))
       throw new Error("Nenhuma imagem foi gerada pela API")
     }
 
-    console.log("[v0] Image generated successfully, converting base64 to URL")
+    console.log("[v0] Image generated successfully, converting base64 to data URL")
 
     const imageDataUrl = `data:image/png;base64,${imageBase64}`
 
@@ -206,7 +208,7 @@ async function generateImageAsync(
       .from("images")
       .update({
         status: "completed",
-        image_url: imageDataUrl, // Store as data URL
+        image_url: imageDataUrl,
         revised_prompt: null, // gpt-image-1 doesn't return revised_prompt
       })
       .eq("id", jobId)

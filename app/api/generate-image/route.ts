@@ -7,17 +7,13 @@ import { handleApiError } from "@/lib/error-handler"
 
 // Garante ambiente Node.js (mantém o process rodando para o async)
 export const runtime = "nodejs"
-// (opcional) aumenta o tempo máximo do route no Vercel/Next
-export const maxDuration = 120
 
 const IMAGE_GENERATION_ENDPOINT = "https://api.openai.com/v1/images/generations"
 const IMAGE_MODEL = "gpt-image-1" as const
 
-// Qualidade interna (seu sistema de créditos) vs qualidade da API (OpenAI)
 type InternalQuality = "low" | "medium" | "high"
 type ApiQuality = "standard" | "hd"
 
-// Mapeia o que vem do front para a qualidade interna
 const frontendToInternal: Record<string, InternalQuality> = {
   standard: "low",
   hd: "high",
@@ -26,14 +22,12 @@ const frontendToInternal: Record<string, InternalQuality> = {
   high: "high",
 }
 
-// Mapeia a qualidade interna para o que a API aceita
 const internalToApi: Record<InternalQuality, ApiQuality> = {
   low: "standard",
-  medium: "standard", // medium usa standard na OpenAI
+  medium: "standard",
   high: "hd",
 }
 
-// Tabela de crédito permanece igual (em cima da qualidade interna)
 const CREDIT_COSTS: Record<InternalQuality, Record<"1024x1024" | "1024x1536" | "1536x1024", number>> = {
   low: { "1024x1024": 1, "1024x1536": 2, "1536x1024": 2 },
   medium: { "1024x1024": 4, "1024x1536": 6, "1536x1024": 6 },
@@ -45,7 +39,6 @@ export async function POST(request: NextRequest) {
     console.log("[v0] Image generation started")
     const supabase = await createClient()
 
-    // Autenticação
     const {
       data: { user },
       error: authError,
@@ -55,21 +48,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Não autenticado" }, { status: 401 })
     }
 
-    // Leitura do corpo
     const body = await request.json()
     const {
       prompt,
-      style = "natural", // "natural" | "vivid"
-      quality: frontendQuality = "standard", // "standard" | "hd" (ou legados)
-      size = "1024x1024", // "1024x1024" | "1024x1536" | "1536x1024"
-    } = body as {
-      prompt?: string
-      style?: "natural" | "vivid" | string
-      quality?: "standard" | "hd" | "low" | "medium" | "high" | string
-      size?: "1024x1024" | "1024x1536" | "1536x1024" | string
-    }
+      style = "natural",
+      quality: frontendQuality = "standard",
+      size = "1024x1024",
+    } = body
 
-    // Normaliza qualidade interna (para créditos/DB) e validação
     const internalQuality: InternalQuality = frontendToInternal[frontendQuality] || "low"
 
     const validation = validateImageGeneration({ prompt, style, quality: internalQuality, size })
@@ -85,7 +71,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Descrição muito longa. Máximo 1000 caracteres." }, { status: 400 })
     }
 
-    // Busca usuário e créditos
     const { data: userData, error: userError } = await supabase
       .from("users")
       .select("credits, role, email")
@@ -114,14 +99,13 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Cria job "pending"
     const { data: jobData, error: jobError } = await supabase
       .from("images")
       .insert({
         user_id: user.id,
         prompt: prompt.trim(),
         style,
-        quality: internalQuality, // armazena a qualidade interna no DB
+        quality: internalQuality,
         status: "pending",
         credits_used: isAdmin ? 0 : requiredCredits,
       })
@@ -133,7 +117,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Erro ao criar job de imagem" }, { status: 500 })
     }
 
-    // Reserva créditos (se não admin)
     if (!isAdmin) {
       const { error: creditError } = await supabase
         .from("users")
@@ -149,7 +132,6 @@ export async function POST(request: NextRequest) {
 
     console.log("[v0] Starting async image generation with GPT Image 1")
 
-    // Dispara o processamento assíncrono
     generateImageAsync(
       jobData.id,
       prompt.trim(),
@@ -163,7 +145,6 @@ export async function POST(request: NextRequest) {
       console.error("[v0] Unhandled error in generateImageAsync:", error)
     })
 
-    // Retorna imediatamente
     return NextResponse.json({
       success: true,
       jobId: jobData.id,
@@ -190,21 +171,11 @@ async function generateImageAsync(
     console.log("[v0] Processing image generation for job:", jobId)
 
     const supabase = await createClient()
-
     await supabase.from("images").update({ status: "processing" }).eq("id", jobId)
 
-    // Qualidade compatível com a API
     const apiQuality: ApiQuality = internalToApi[internalQuality]
 
-    // Monta payload correto para a OpenAI
-    const payload: {
-      model: string
-      prompt: string
-      style?: "natural" | "vivid"
-      quality: ApiQuality // "standard" | "hd"
-      size: "1024x1024" | "1024x1536" | "1536x1024"
-      n: number
-    } = {
+    const payload = {
       model: IMAGE_MODEL,
       prompt,
       style: style === "vivid" ? "vivid" : "natural",
@@ -216,7 +187,7 @@ async function generateImageAsync(
     console.log("[v0] Sending request to OpenAI with payload:", JSON.stringify(payload, null, 2))
 
     const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 90_000) // 90s
+    const timeout = setTimeout(() => controller.abort(), 90000)
 
     const response = await fetch(IMAGE_GENERATION_ENDPOINT, {
       method: "POST",
@@ -231,21 +202,18 @@ async function generateImageAsync(
     clearTimeout(timeout)
 
     if (!response.ok) {
-      // Tenta ler o corpo de erro
-      const errorData = await response.json().catch(() => ({} as any))
+      const errorData = await response.json().catch(() => ({}))
       console.error("[v0] OpenAI API error response:", JSON.stringify(errorData, null, 2))
       console.error("[v0] Status code:", response.status)
 
-      let errorMessage = errorData?.error?.message || `HTTP ${response.status}: Erro ao gerar imagem`
+      let errorMessage = errorData.error?.message || `HTTP ${response.status}: Erro ao gerar imagem`
 
       if (response.status === 401) {
         errorMessage = "Erro de autenticação com a API OpenAI. Verifique a chave da API."
       } else if (response.status === 429) {
         errorMessage = "Limite de requisições atingido. Tente novamente em alguns minutos."
       } else if (response.status === 400) {
-        errorMessage = `Parâmetros inválidos: ${
-          errorData?.error?.message || "Verifique prompt, size, quality ou style"
-        }`
+        errorMessage = `Parâmetros inválidos: ${errorData.error?.message || "Verifique o prompt e configurações"}`
       }
 
       throw new Error(errorMessage)
@@ -254,11 +222,8 @@ async function generateImageAsync(
     const data = await response.json()
     console.log("[v0] Response received from OpenAI successfully")
 
-    const imageBase64: string | undefined = data?.data?.[0]?.b64_json
-    if (!imageBase64) {
-      console.error("[v0] No image data in response:", JSON.stringify(data, null, 2))
-      throw new Error("Nenhuma imagem foi gerada pela API")
-    }
+    const imageBase64 = data.data?.[0]?.b64_json
+    if (!imageBase64) throw new Error("Nenhuma imagem foi gerada pela API")
 
     const imageDataUrl = `data:image/png;base64,${imageBase64}`
 
@@ -267,7 +232,7 @@ async function generateImageAsync(
       .update({
         status: "completed",
         image_url: imageDataUrl,
-        revised_prompt: null, // gpt-image-1 não retorna revised_prompt
+        revised_prompt: null,
       })
       .eq("id", jobId)
 
@@ -278,24 +243,17 @@ async function generateImageAsync(
       action: "generate_image",
       credits_used: isAdmin ? 0 : creditsUsed,
       cost_usd: 0,
-      metadata: {
-        prompt,
-        style,
-        quality: internalQuality,
-        size,
-        model: IMAGE_MODEL,
-        usage, // pode ser null
-      },
+      metadata: { prompt, style, quality: internalQuality, size, model: IMAGE_MODEL, usage },
     })
 
     console.log("[v0] Image generation completed successfully for job:", jobId)
-  } catch (err) {
-    console.error("[v0] Image generation failed:", err)
-    const errorMessage = err instanceof Error ? err.message : "Erro desconhecido ao gerar imagem"
+  } catch (error) {
+    console.error("[v0] Image generation failed:", error)
+
+    const errorMessage = error instanceof Error ? error.message : "Erro desconhecido ao gerar imagem"
 
     const supabase = await createClient()
 
-    // Marca job como failed
     await supabase
       .from("images")
       .update({
@@ -304,7 +262,6 @@ async function generateImageAsync(
       })
       .eq("id", jobId)
 
-    // Devolve créditos em caso de falha (se não for admin)
     if (!isAdmin) {
       const { data: userData } = await supabase.from("users").select("credits").eq("id", userId).single()
       if (userData) {

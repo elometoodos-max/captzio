@@ -1,32 +1,32 @@
-// app/api/image-job/[id]/route.ts
-import { NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
+import { NextResponse } from "next/server"
 
-export const runtime = "nodejs"
-export const dynamic = "force-dynamic"
-
-export async function GET(
-  _req: Request,
-  { params }: { params: { id: string } },
-) {
+export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const { id } = params
-    if (!id || typeof id !== "string") {
-      return NextResponse.json({ error: "ID inválido" }, { status: 400 })
+    const { id } = await params
+    const supabase = await createClient()
+
+    // Check authentication
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser()
+
+    if (authError || !user) {
+      return NextResponse.json({ error: "Não autenticado" }, { status: 401 })
     }
 
-    const supabase = await createClient()
-    const { data: { user }, error: authError } = await supabase.auth.getUser()
-    if (authError || !user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 })
-
+    // Get image job
     const { data: imageJob, error: jobError } = await supabase
       .from("images")
-      .select("id, user_id, status, image_url, error_message, revised_prompt, created_at")
+      .select("*")
       .eq("id", id)
       .eq("user_id", user.id)
       .single()
 
-    if (jobError || !imageJob) return NextResponse.json({ error: "Job não encontrado" }, { status: 404 })
+    if (jobError || !imageJob) {
+      return NextResponse.json({ error: "Job não encontrado" }, { status: 404 })
+    }
 
     return NextResponse.json({
       job: {
@@ -34,8 +34,6 @@ export async function GET(
         status: imageJob.status,
         image_url: imageJob.image_url,
         error_message: imageJob.error_message,
-        revised_prompt: imageJob.revised_prompt ?? null,
-        created_at: imageJob.created_at,
       },
     })
   } catch (error) {

@@ -1,6 +1,3 @@
-// app/dashboard/images/page.tsx
-export const dynamic = "force-dynamic"
-
 import { redirect } from "next/navigation"
 import Link from "next/link"
 import { createClient } from "@/lib/supabase/server"
@@ -20,6 +17,7 @@ export default async function ImagesPage() {
     redirect("/auth/login")
   }
 
+  // Fetch user's images
   const { data: images } = await supabase
     .from("images")
     .select("*")
@@ -61,7 +59,7 @@ export default async function ImagesPage() {
 
           {images && images.length > 0 ? (
             <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 animate-fade-in">
-              {images.map((image: any, index: number) => (
+              {images.map((image, index) => (
                 <Card
                   key={image.id}
                   className="card-hover overflow-hidden"

@@ -1,8 +1,6 @@
 "use client"
 
-import type React from "react"
-
-import { useState, useEffect } from "react"
+import React, { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
@@ -14,6 +12,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Sparkles, Copy, Check, ArrowLeft, Loader2, Crown, AlertCircle, Save } from "lucide-react"
 import { Logo } from "@/components/logo"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { debounce } from "@/lib/performance"
+import { announceToScreenReader } from "@/lib/accessibility"
+import { analytics } from "@/lib/analytics"
 
 interface CaptionResult {
   caption: string
@@ -35,6 +36,15 @@ export default function GenerateCaptionPage() {
   const [creditsRemaining, setCreditsRemaining] = useState<number | string>(0)
   const [savedToLibrary, setSavedToLibrary] = useState<boolean[]>([])
 
+  const debouncedSave = React.useMemo(
+    () =>
+      debounce((draft: any) => {
+        localStorage.setItem("caption-draft", JSON.stringify(draft))
+        console.log("[v0] Draft auto-saved")
+      }, 1000),
+    [],
+  )
+
   useEffect(() => {
     const savedDraft = localStorage.getItem("caption-draft")
     if (savedDraft) {
@@ -52,8 +62,12 @@ export default function GenerateCaptionPage() {
 
   useEffect(() => {
     const draft = { businessDescription, tone, platform, goal }
-    localStorage.setItem("caption-draft", JSON.stringify(draft))
-  }, [businessDescription, tone, platform, goal])
+    debouncedSave(draft)
+  }, [businessDescription, tone, platform, goal, debouncedSave])
+
+  useEffect(() => {
+    analytics.trackPageView("/dashboard/generate-caption")
+  }, [])
 
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -67,6 +81,14 @@ export default function GenerateCaptionPage() {
       setError("A descrição deve ter pelo menos 10 caracteres para gerar legendas de qualidade")
       return
     }
+
+    announceToScreenReader("Gerando legendas, por favor aguarde", "assertive")
+
+    analytics.track("caption_generation_started", {
+      tone,
+      platform,
+      numVariations: 3,
+    })
 
     setIsLoading(true)
     setError(null)
@@ -98,8 +120,22 @@ export default function GenerateCaptionPage() {
       setSavedToLibrary(new Array(data.results.length).fill(false))
 
       localStorage.removeItem("caption-draft")
+
+      announceToScreenReader(`${data.results.length} legendas geradas com sucesso`, "polite")
+
+      analytics.track("caption_generation_success", {
+        count: data.results.length,
+        creditsRemaining: data.creditsRemaining,
+      })
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Erro ao gerar legendas com IA")
+      const errorMessage = err instanceof Error ? err.message : "Erro ao gerar legendas com IA"
+      setError(errorMessage)
+
+      announceToScreenReader(`Erro: ${errorMessage}`, "assertive")
+
+      analytics.trackError(err instanceof Error ? err : new Error(errorMessage), {
+        context: "caption_generation",
+      })
     } finally {
       setIsLoading(false)
     }

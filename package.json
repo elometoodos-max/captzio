@@ -10,6 +10,7 @@
     "db:seed": "tsx prisma/seed.ts",
     "db:studio": "prisma studio",
     "dev": "next dev",
+    "postinstall": "prisma generate || echo \"skip prisma generate\"",
     "lint": "next lint",
     "start": "next start"
   },
@@ -60,14 +61,5 @@
     "tsx": "^4.19.2",
     "typescript": "^5"
   },
-  "pnpm": {
-    "allowedBuildScripts": [
-      "prisma",
-      "@prisma/client",
-      "@prisma/engines",
-      "sharp",
-      "esbuild",
-      "@tailwindcss/oxide"
-    ]
-  }
+  "packageManager": "pnpm@10.18.2"
 }

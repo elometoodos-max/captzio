@@ -1,8 +1,6 @@
 export const config = {
   openai: {
-    apiKey:
-      process.env.OPENAI_API_KEY ||
-      "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",
+    apiKey: process.env.OPENAI_API_KEY || "",
     models: {
       caption: "gpt-5-nano", // Fastest and cheapest GPT-5 model
       image: "gpt-image-1",
@@ -28,9 +26,12 @@ export const config = {
   },
 } as const
 
-if (!config.openai.apiKey || config.openai.apiKey.length < 20) {
-  console.error("[v0] ERRO CRÍTICO: Chave da API OpenAI não está configurada corretamente!")
-  console.error("[v0] Configure a variável de ambiente OPENAI_API_KEY")
+if (!config.openai.apiKey) {
+  console.error("❌ [ERRO CRÍTICO] Chave da API OpenAI não está configurada!")
+  console.error("Configure a variável de ambiente OPENAI_API_KEY no Vercel")
+} else if (config.openai.apiKey.length < 20 || !config.openai.apiKey.startsWith("sk-")) {
+  console.error("❌ [ERRO CRÍTICO] Chave da API OpenAI é inválida!")
+  console.error("A chave deve começar com 'sk-' e ter pelo menos 20 caracteres")
 } else {
-  console.log("[v0] OpenAI API key configurada com sucesso")
+  console.log("✅ OpenAI API key configurada com sucesso")
 }

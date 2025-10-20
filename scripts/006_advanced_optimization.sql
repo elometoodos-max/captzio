@@ -44,13 +44,13 @@ $$;
 -- ============================================================================
 
 -- Índice para imagens pendentes (queries frequentes)
-create index if not exists idx_images_pending_old
-  on public.images(created_at)
-  where status = 'pending' and created_at < now() - interval '5 minutes';
+create index if not exists idx_images_pending_status
+  on public.images(status, created_at)
+  where status = 'pending';
 
 -- Índice para transações pendentes
-create index if not exists idx_transactions_pending
-  on public.transactions(created_at)
+create index if not exists idx_transactions_pending_status
+  on public.transactions(status, created_at)
   where status = 'pending';
 
 -- Índice GIN para busca em arrays de hashtags
@@ -58,8 +58,8 @@ create index if not exists idx_posts_hashtags_gin
   on public.posts using gin(hashtags);
 
 -- Índice para busca de texto em captions (full-text search)
-create index if not exists idx_posts_caption_fts
-  on public.posts using gin(to_tsvector('portuguese', caption));
+-- create index if not exists idx_posts_caption_fts
+--   on public.posts using gin(to_tsvector('portuguese', caption));
 
 -- ============================================================================
 -- PARTE 3: MATERIALIZED VIEWS PARA DASHBOARDS
@@ -263,18 +263,129 @@ end;
 $$;
 
 -- ============================================================================
--- PARTE 7: AGENDAMENTO DE TAREFAS (REQUER pg_cron EXTENSION)
+-- PARTE 7: TABELA DE LOGS DE ERROS PARA ADMIN DASHBOARD
 -- ============================================================================
 
--- Nota: As tarefas abaixo requerem a extensão pg_cron
--- Para habilitar: CREATE EXTENSION IF NOT EXISTS pg_cron;
+-- Nova tabela para rastrear erros do sistema
+create table if not exists public.system_errors (
+  id uuid primary key default gen_random_uuid(),
+  error_type text not null, -- 'api', 'sql', 'caption', 'image', 'auth', 'payment'
+  severity text not null check (severity in ('low', 'medium', 'high', 'critical')),
+  message text not null,
+  stack_trace text,
+  user_id uuid references public.users(id) on delete set null,
+  endpoint text,
+  method text,
+  status_code integer,
+  metadata jsonb default '{}'::jsonb,
+  resolved boolean default false,
+  resolved_at timestamptz,
+  resolved_by uuid references public.users(id) on delete set null,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
 
--- Comentários sobre agendamento recomendado:
-comment on function public.archive_old_usage_logs is 'Executar diariamente às 2h: SELECT cron.schedule(''archive-logs'', ''0 2 * * *'', ''SELECT public.archive_old_usage_logs()'')';
-comment on function public.cleanup_failed_images is 'Executar diariamente às 3h: SELECT cron.schedule(''cleanup-images'', ''0 3 * * *'', ''SELECT public.cleanup_failed_images()'')';
-comment on function public.cleanup_stale_transactions is 'Executar a cada hora: SELECT cron.schedule(''cleanup-transactions'', ''0 * * * *'', ''SELECT public.cleanup_stale_transactions()'')';
-comment on function public.refresh_admin_dashboard is 'Executar a cada hora: SELECT cron.schedule(''refresh-dashboard'', ''0 * * * *'', ''SELECT public.refresh_admin_dashboard()'')';
-comment on function public.create_data_snapshot is 'Executar diariamente às 1h: SELECT cron.schedule(''data-snapshot'', ''0 1 * * *'', ''SELECT public.create_data_snapshot()'')';
+-- Índices para a tabela de erros
+create index if not exists idx_system_errors_type on public.system_errors(error_type);
+create index if not exists idx_system_errors_severity on public.system_errors(severity);
+create index if not exists idx_system_errors_resolved on public.system_errors(resolved);
+create index if not exists idx_system_errors_created_at on public.system_errors(created_at desc);
+create index if not exists idx_system_errors_user_id on public.system_errors(user_id);
+
+-- RLS para system_errors (apenas admins podem ver)
+alter table public.system_errors enable row level security;
+
+create policy "Admins podem ver todos os erros"
+  on public.system_errors for select
+  using (
+    exists (
+      select 1 from public.users
+      where users.id = auth.uid()
+      and users.role = 'admin'
+    )
+  );
+
+create policy "Admins podem inserir erros"
+  on public.system_errors for insert
+  with check (
+    exists (
+      select 1 from public.users
+      where users.id = auth.uid()
+      and users.role = 'admin'
+    )
+  );
+
+create policy "Admins podem atualizar erros"
+  on public.system_errors for update
+  using (
+    exists (
+      select 1 from public.users
+      where users.id = auth.uid()
+      and users.role = 'admin'
+    )
+  );
+
+-- Trigger para updated_at
+create or replace function public.update_system_errors_updated_at()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$;
+
+create trigger system_errors_updated_at
+  before update on public.system_errors
+  for each row
+  execute function public.update_system_errors_updated_at();
+
+-- Função para registrar erros
+create or replace function public.log_system_error(
+  p_error_type text,
+  p_severity text,
+  p_message text,
+  p_stack_trace text default null,
+  p_user_id uuid default null,
+  p_endpoint text default null,
+  p_method text default null,
+  p_status_code integer default null,
+  p_metadata jsonb default '{}'::jsonb
+)
+returns uuid
+language plpgsql
+security definer
+as $$
+declare
+  v_error_id uuid;
+begin
+  insert into public.system_errors (
+    error_type,
+    severity,
+    message,
+    stack_trace,
+    user_id,
+    endpoint,
+    method,
+    status_code,
+    metadata
+  ) values (
+    p_error_type,
+    p_severity,
+    p_message,
+    p_stack_trace,
+    p_user_id,
+    p_endpoint,
+    p_method,
+    p_status_code,
+    p_metadata
+  )
+  returning id into v_error_id;
+  
+  return v_error_id;
+end;
+$$;
 
 -- ============================================================================
 -- MENSAGEM FINAL
@@ -286,26 +397,12 @@ begin
   raise notice 'SCRIPT DE OTIMIZAÇÃO AVANÇADA EXECUTADO COM SUCESSO!';
   raise notice '============================================================================';
   raise notice '';
-  raise notice '✓ Tabela de arquivamento criada';
-  raise notice '✓ Índices especializados adicionados';
+  raise notice '✓ Índices otimizados (sem funções não-IMMUTABLE)';
+  raise notice '✓ Tabela de erros do sistema criada';
   raise notice '✓ Materialized view para dashboard criada';
   raise notice '✓ Funções de monitoramento disponíveis';
   raise notice '✓ Políticas de limpeza implementadas';
   raise notice '✓ Sistema de backup configurado';
-  raise notice '';
-  raise notice 'Funções de manutenção disponíveis:';
-  raise notice '  - archive_old_usage_logs(): Arquiva logs antigos';
-  raise notice '  - cleanup_failed_images(): Remove imagens falhadas';
-  raise notice '  - cleanup_stale_transactions(): Limpa transações pendentes';
-  raise notice '  - refresh_admin_dashboard(): Atualiza dashboard admin';
-  raise notice '  - create_data_snapshot(): Cria snapshot de dados';
-  raise notice '';
-  raise notice 'Funções de monitoramento disponíveis:';
-  raise notice '  - check_database_health(): Verifica saúde do banco';
-  raise notice '  - get_performance_stats(): Estatísticas de performance';
-  raise notice '';
-  raise notice 'IMPORTANTE: Para agendamento automático, habilite pg_cron:';
-  raise notice '  CREATE EXTENSION IF NOT EXISTS pg_cron;';
   raise notice '';
   raise notice '============================================================================';
 end $$;

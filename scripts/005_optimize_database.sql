@@ -3,8 +3,8 @@
 -- Fase 1: Limpeza de Dados e Constraints Básicas
 -- ============================================================================
 -- Este script é idempotente e pode ser executado múltiplas vezes
--- Versão: 1.1
--- Data: 2025-01-20
+-- Versão: 1.2 - CORRIGIDO
+-- Data: 2025-01-21
 
 -- ============================================================================
 -- PARTE 1: LIMPEZA DE DADOS INVÁLIDOS

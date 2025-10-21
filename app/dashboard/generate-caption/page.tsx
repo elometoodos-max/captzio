@@ -9,12 +9,14 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Sparkles, Copy, Check, ArrowLeft, Loader2, Crown, AlertCircle, Save } from "lucide-react"
+import { Sparkles, Copy, Check, ArrowLeft, Loader2, AlertCircle, Save } from "lucide-react"
 import { Logo } from "@/components/logo"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { debounce } from "@/lib/performance"
 import { announceToScreenReader } from "@/lib/accessibility"
 import { analytics } from "@/lib/analytics"
+import { CreditBadge } from "@/components/credit-badge"
+import { useCredits } from "@/lib/hooks/use-credits"
 
 interface CaptionResult {
   caption: string
@@ -35,6 +37,8 @@ export default function GenerateCaptionPage() {
   const [isAdmin, setIsAdmin] = useState(false)
   const [creditsRemaining, setCreditsRemaining] = useState<number | string>(0)
   const [savedToLibrary, setSavedToLibrary] = useState<boolean[]>([])
+
+  const { credits: userCredits, isAdmin: userIsAdmin, refreshCredits } = useCredits()
 
   const debouncedSave = React.useMemo(
     () =>
@@ -68,6 +72,13 @@ export default function GenerateCaptionPage() {
   useEffect(() => {
     analytics.trackPageView("/dashboard/generate-caption")
   }, [])
+
+  useEffect(() => {
+    if (userCredits !== undefined) {
+      setCreditsRemaining(userCredits)
+      setIsAdmin(userIsAdmin)
+    }
+  }, [userCredits, userIsAdmin])
 
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -115,9 +126,9 @@ export default function GenerateCaptionPage() {
       }
 
       setResults(data.results)
-      setIsAdmin(data.isAdmin || false)
-      setCreditsRemaining(data.creditsRemaining)
       setSavedToLibrary(new Array(data.results.length).fill(false))
+
+      refreshCredits()
 
       localStorage.removeItem("caption-draft")
 
@@ -188,18 +199,7 @@ export default function GenerateCaptionPage() {
               <Logo size="sm" />
             </Link>
             <div className="flex items-center gap-2 sm:gap-4">
-              {isAdmin && (
-                <div className="hidden sm:flex items-center gap-1 rounded-full bg-accent px-3 py-1 text-xs font-medium">
-                  <Crown className="h-3 w-3" />
-                  Admin - Teste Grátis
-                </div>
-              )}
-              {!isAdmin && creditsRemaining !== 0 && (
-                <div className="text-sm text-muted-foreground">
-                  <span className="hidden sm:inline">Créditos: </span>
-                  <span className="font-semibold text-foreground">{creditsRemaining}</span>
-                </div>
-              )}
+              <CreditBadge credits={creditsRemaining} isAdmin={isAdmin} />
               <Button variant="ghost" size="sm" asChild className="transition-all hover:scale-105">
                 <Link href="/dashboard">
                   <ArrowLeft className="mr-2 h-4 w-4" />

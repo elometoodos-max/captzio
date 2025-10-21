@@ -3,7 +3,7 @@
 -- Fase 2: Particionamento, Arquivamento e Monitoramento
 -- ============================================================================
 -- Este script implementa otimizações avançadas para escalabilidade
--- Versão: 1.0
+-- Versão: 1.1 - CORRIGIDO (sem funções não-IMMUTABLE em índices)
 -- Data: 2025-01-20
 
 -- ============================================================================
@@ -56,10 +56,6 @@ create index if not exists idx_transactions_pending_status
 -- Índice GIN para busca em arrays de hashtags
 create index if not exists idx_posts_hashtags_gin
   on public.posts using gin(hashtags);
-
--- Índice para busca de texto em captions (full-text search)
--- create index if not exists idx_posts_caption_fts
---   on public.posts using gin(to_tsvector('portuguese', caption));
 
 -- ============================================================================
 -- PARTE 3: MATERIALIZED VIEWS PARA DASHBOARDS

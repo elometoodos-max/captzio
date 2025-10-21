@@ -6,7 +6,17 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { CheckCircle2, XCircle, Users, ImageIcon, MessageSquare, DollarSign, Activity, RefreshCw } from "lucide-react"
+import {
+  CheckCircle2,
+  XCircle,
+  Users,
+  ImageIcon,
+  MessageSquare,
+  DollarSign,
+  Activity,
+  RefreshCw,
+  AlertTriangle,
+} from "lucide-react"
 
 interface SystemError {
   id: string
@@ -65,21 +75,19 @@ export default function AdminDashboard() {
   const fetchData = async () => {
     setLoading(true)
     try {
-      // Buscar estatísticas
-      const statsRes = await fetch("/api/admin/stats")
-      if (statsRes.ok) {
-        const statsData = await statsRes.json()
-        setStats(statsData)
-      }
-
-      // Buscar erros
       const params = new URLSearchParams()
       if (filterType) params.append("type", filterType)
       if (filterSeverity) params.append("severity", filterSeverity)
       params.append("resolved", showResolved.toString())
       params.append("limit", "100")
 
-      const errorsRes = await fetch(`/api/admin/errors?${params}`)
+      const [statsRes, errorsRes] = await Promise.all([fetch("/api/admin/stats"), fetch(`/api/admin/errors?${params}`)])
+
+      if (statsRes.ok) {
+        const statsData = await statsRes.json()
+        setStats(statsData)
+      }
+
       if (errorsRes.ok) {
         const errorsData = await errorsRes.json()
         setErrors(errorsData.errors || [])
@@ -127,73 +135,81 @@ export default function AdminDashboard() {
     healthStatus === "healthy" ? "text-green-500" : healthStatus === "warning" ? "text-yellow-500" : "text-red-500"
 
   return (
-    <div className="container mx-auto space-y-6 p-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
+    <div className="container mx-auto space-y-4 sm:space-y-6 p-3 sm:p-4 md:p-6">
+      <div className="flex flex-col gap-3 sm:gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-3xl font-bold">Dashboard Administrativo</h1>
-          <p className="text-muted-foreground">Monitoramento completo do sistema Captzio</p>
+          <h1 className="text-xl sm:text-2xl md:text-3xl font-bold">Dashboard Administrativo</h1>
+          <p className="text-xs sm:text-sm md:text-base text-muted-foreground mt-1">
+            Monitoramento completo do sistema Captzio
+          </p>
         </div>
-        <Button onClick={fetchData} disabled={loading}>
+        <Button onClick={fetchData} disabled={loading} size="sm" className="w-full sm:w-auto">
           <RefreshCw className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`} />
           Atualizar
         </Button>
       </div>
 
-      {/* Status de Saúde */}
       {stats && (
-        <Alert className={healthStatus === "critical" ? "border-red-500" : ""}>
+        <Alert className={`${healthStatus === "critical" ? "border-red-500 bg-red-50 dark:bg-red-950/20" : ""}`}>
           <Activity className={`h-4 w-4 ${healthColor}`} />
-          <AlertTitle className="flex items-center gap-2">
-            Status do Sistema: <span className={healthColor}>{healthStatus.toUpperCase()}</span>
+          <AlertTitle className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-2">
+            <span className="text-sm sm:text-base">Status do Sistema:</span>
+            <span className={`font-bold text-sm sm:text-base ${healthColor}`}>{healthStatus.toUpperCase()}</span>
           </AlertTitle>
-          <AlertDescription>
-            Uptime: {stats.health.uptime} | {stats.errors.unresolved} erros não resolvidos
-            {stats.errors.critical > 0 && ` | ${stats.errors.critical} erros críticos`}
+          <AlertDescription className="text-xs sm:text-sm mt-2">
+            <div className="flex flex-col gap-1 sm:flex-row sm:gap-4">
+              <span>Uptime: {stats.health.uptime}</span>
+              <span>{stats.errors.unresolved} erros não resolvidos</span>
+              {stats.errors.critical > 0 && (
+                <span className="font-semibold text-red-600 dark:text-red-400 flex items-center gap-1">
+                  <AlertTriangle className="h-3 w-3" />
+                  {stats.errors.critical} erros críticos
+                </span>
+              )}
+            </div>
           </AlertDescription>
         </Alert>
       )}
 
-      {/* Cards de Estatísticas */}
       {stats && (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          <Card>
+        <div className="grid gap-3 sm:gap-4 grid-cols-2 lg:grid-cols-4">
+          <Card className="transition-all hover:shadow-lg hover:scale-105">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total de Usuários</CardTitle>
-              <Users className="h-4 w-4 text-muted-foreground" />
+              <CardTitle className="text-xs sm:text-sm font-medium">Usuários</CardTitle>
+              <Users className="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{stats.users.total}</div>
+              <div className="text-xl sm:text-2xl font-bold">{stats.users.total}</div>
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="transition-all hover:shadow-lg hover:scale-105">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Legendas Geradas</CardTitle>
-              <MessageSquare className="h-4 w-4 text-muted-foreground" />
+              <CardTitle className="text-xs sm:text-sm font-medium">Legendas</CardTitle>
+              <MessageSquare className="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{stats.content.captions}</div>
+              <div className="text-xl sm:text-2xl font-bold">{stats.content.captions}</div>
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="transition-all hover:shadow-lg hover:scale-105">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Imagens Geradas</CardTitle>
-              <ImageIcon className="h-4 w-4 text-muted-foreground" />
+              <CardTitle className="text-xs sm:text-sm font-medium">Imagens</CardTitle>
+              <ImageIcon className="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{stats.content.images}</div>
+              <div className="text-xl sm:text-2xl font-bold">{stats.content.images}</div>
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="transition-all hover:shadow-lg hover:scale-105">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Receita Total</CardTitle>
-              <DollarSign className="h-4 w-4 text-muted-foreground" />
+              <CardTitle className="text-xs sm:text-sm font-medium">Receita</CardTitle>
+              <DollarSign className="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">
+              <div className="text-lg sm:text-2xl font-bold">
                 {stats.revenue.currency} {stats.revenue.total.toFixed(2)}
               </div>
             </CardContent>
@@ -203,17 +219,26 @@ export default function AdminDashboard() {
 
       {/* Tabs de Erros */}
       <Tabs defaultValue="all" className="space-y-4">
-        <TabsList>
-          <TabsTrigger value="all">Todos os Erros ({errors.length})</TabsTrigger>
-          <TabsTrigger value="critical">
+        <TabsList className="grid w-full grid-cols-3">
+          <TabsTrigger value="all" className="text-xs sm:text-sm">
+            Todos ({errors.length})
+          </TabsTrigger>
+          <TabsTrigger value="critical" className="text-xs sm:text-sm">
             Críticos ({errors.filter((e) => e.severity === "critical").length})
           </TabsTrigger>
-          <TabsTrigger value="unresolved">Não Resolvidos ({errors.filter((e) => !e.resolved).length})</TabsTrigger>
+          <TabsTrigger value="unresolved" className="text-xs sm:text-sm">
+            Não Resolvidos ({errors.filter((e) => !e.resolved).length})
+          </TabsTrigger>
         </TabsList>
 
         {/* Filtros */}
         <div className="flex flex-wrap gap-2">
-          <Button variant={filterType === null ? "default" : "outline"} size="sm" onClick={() => setFilterType(null)}>
+          <Button
+            variant={filterType === null ? "default" : "outline"}
+            size="sm"
+            onClick={() => setFilterType(null)}
+            className="text-xs"
+          >
             Todos os Tipos
           </Button>
           {Object.entries(errorTypeLabels).map(([key, label]) => (
@@ -222,6 +247,7 @@ export default function AdminDashboard() {
               variant={filterType === key ? "default" : "outline"}
               size="sm"
               onClick={() => setFilterType(key)}
+              className="text-xs"
             >
               {label}
             </Button>
@@ -230,8 +256,9 @@ export default function AdminDashboard() {
             variant={showResolved ? "default" : "outline"}
             size="sm"
             onClick={() => setShowResolved(!showResolved)}
+            className="text-xs"
           >
-            {showResolved ? "Mostrar Não Resolvidos" : "Mostrar Resolvidos"}
+            {showResolved ? "Não Resolvidos" : "Resolvidos"}
           </Button>
         </div>
 

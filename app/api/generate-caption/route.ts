@@ -49,15 +49,15 @@ Objetivo: ${goal || "engajamento"}
 
 Retorne APENAS um objeto JSON válido com esta estrutura exata:
 {
-  "caption": "texto da legenda (máximo 150 caracteres)",
-  "cta": "call to action (máximo 80 caracteres)",
+  "caption": "texto da legenda (máximo 200 caracteres)",
+  "cta": "call to action (máximo 100 caracteres)",
   "hashtags": ["#hashtag1", "#hashtag2", "#hashtag3"]
 }
 
 Regras importantes:
 - Caption: criativa, envolvente, em português brasileiro
 - CTA: clara e direta ao ponto
-- Hashtags: exatamente 3 hashtags relevantes com #
+- Hashtags: exatamente 3 a 5 hashtags relevantes com #
 - Sem explicações, apenas o JSON`
 
   const payload = {
@@ -73,13 +73,13 @@ Regras importantes:
         schema: {
           type: "object",
           properties: {
-            caption: { type: "string", maxLength: 150 },
-            cta: { type: "string", maxLength: 80 },
+            caption: { type: "string", maxLength: 200 }, // Increased max length slightly
+            cta: { type: "string", maxLength: 100 },
             hashtags: {
               type: "array",
               items: { type: "string" },
               minItems: 3,
-              maxItems: 3,
+              maxItems: 5, // Allow up to 5 hashtags
             },
           },
           required: ["caption", "cta", "hashtags"],
@@ -88,7 +88,7 @@ Regras importantes:
       },
     },
     instructions:
-      "Você é um especialista em marketing digital e copywriting para redes sociais brasileiras. Retorne apenas JSON válido, sem markdown ou explicações. Seja criativo e engajante.",
+      "Você é um especialista em marketing digital e copywriting para redes sociais brasileiras. Sua missão é criar legendas altamente engajadoras, usando gírias atuais quando apropriado para o tom, e focando em conversão. Retorne apenas JSON válido.", // Improved system instruction
     input: prompt,
     max_output_tokens: MAX_OUTPUT_TOKENS,
     store: false, // Don't store responses to save costs
@@ -133,7 +133,7 @@ Regras importantes:
 function extractCaptionFromResponse(response: any): CaptionResult {
   console.log("[v0] Extraindo legenda da resposta")
 
-  // Try to get output_text first (SDK helper)
+  // 1. Try structured output (most reliable for Responses API)
   if (response.output_text) {
     try {
       const parsed = JSON.parse(response.output_text)
@@ -141,11 +141,11 @@ function extractCaptionFromResponse(response: any): CaptionResult {
         return normalizeCaption(parsed)
       }
     } catch (e) {
-      console.log("[v0] output_text não é JSON válido")
+      console.log("[v0] output_text não é JSON válido:", e)
     }
   }
 
-  // Try to extract from output array
+  // 2. Try to extract from output array (standard Responses API format)
   if (Array.isArray(response.output)) {
     for (const item of response.output) {
       // Skip reasoning items
@@ -161,7 +161,7 @@ function extractCaptionFromResponse(response: any): CaptionResult {
                 return normalizeCaption(parsed)
               }
             } catch (e) {
-              console.log("[v0] Conteúdo não é JSON válido")
+              console.log("[v0] Conteúdo não é JSON válido:", e)
             }
           }
         }
@@ -169,7 +169,22 @@ function extractCaptionFromResponse(response: any): CaptionResult {
     }
   }
 
-  throw new Error("Não foi possível extrair legenda válida da resposta da IA")
+  // 3. Fallback: Try to find JSON in the raw text if structure failed
+  const rawText = JSON.stringify(response)
+  const jsonMatch = rawText.match(/\{[\s\S]*"caption"[\s\S]*"cta"[\s\S]*"hashtags"[\s\S]*\}/)
+  if (jsonMatch) {
+    try {
+      const parsed = JSON.parse(jsonMatch[0])
+      if (isValidCaption(parsed)) {
+        return normalizeCaption(parsed)
+      }
+    } catch (e) {
+      console.log("[v0] Fallback JSON extraction failed")
+    }
+  }
+
+  console.error("[v0] Falha na extração. Resposta bruta:", JSON.stringify(response).substring(0, 500))
+  throw new Error("A IA gerou uma resposta, mas não foi possível processá-la. Tente novamente.")
 }
 
 function isValidCaption(obj: any): obj is CaptionResult {
@@ -182,6 +197,7 @@ function isValidCaption(obj: any): obj is CaptionResult {
     obj.cta.trim().length > 0 &&
     Array.isArray(obj.hashtags) &&
     obj.hashtags.length >= 3 &&
+    obj.hashtags.length <= 5 && // Allow up to 5 hashtags
     obj.hashtags.every((h: any) => typeof h === "string" && h.trim().length > 0)
   )
 }

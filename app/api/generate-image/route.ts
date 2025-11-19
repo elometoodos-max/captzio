@@ -44,8 +44,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: validation.error }, { status: 400 })
     }
 
-    if (!prompt || prompt.trim().length < 10) {
+    if (prompt.trim().length < 10) {
       return NextResponse.json({ error: "Descrição muito curta. Mínimo 10 caracteres." }, { status: 400 })
+    }
+
+    if (prompt.trim().split(" ").length < 3) {
+      return NextResponse.json({ error: "Descrição muito vaga. Por favor, adicione mais detalhes para um melhor resultado." }, { status: 400 })
     }
 
     if (prompt.trim().length > 1000) {
@@ -117,9 +121,11 @@ export async function POST(request: NextRequest) {
 
     console.log("[v0] Starting async image generation with GPT Image 1")
 
+    // Fire and forget, but log errors
     generateImageAsync(jobData.id, prompt.trim(), style, quality, size, user.id, isAdmin, requiredCredits).catch(
       (error) => {
-        console.error("[v0] Unhandled error in generateImageAsync:", error)
+        console.error("[v0] CRITICAL: Unhandled error in generateImageAsync:", error)
+        // Attempt to update job status to failed if possible, though generateImageAsync tries this internally
       },
     )
 
@@ -155,7 +161,7 @@ async function generateImageAsync(
 
     console.log("[v0] Calling GPT Image 1 API with quality:", quality, "size:", size)
 
-    const enhancedPrompt = `${prompt}. High quality, professional, detailed.`
+    const enhancedPrompt = `${prompt}. High quality, professional, detailed, 8k resolution, sharp focus.` // Improved prompt enhancement
 
     const payload = {
       model: IMAGE_MODEL,
@@ -163,6 +169,7 @@ async function generateImageAsync(
       quality: quality, // low, medium, or high
       size: size, // 1024x1024, 1024x1536, or 1536x1024
       n: 1,
+      response_format: "b64_json", // Explicitly request base64 JSON
     }
 
     const controller = new AbortController()
